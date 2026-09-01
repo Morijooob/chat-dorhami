@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "chat-dorhami",
-  "main": "Publicsrc/index.js",
+  "main": "publicsrc/index.js",
   "compatibility_date": "2026-09-01",
   "durable_objects": {
     "bindings": [
@@ -20,6 +20,6 @@
     }
   ],
   "assets": {
-    "directory": "./Public"
+    "directory": "./public"
   }
 }
