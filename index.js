@@ -13,16 +13,20 @@ const AUTH_FALLBACK = `
     if(!form||!userEl||!passEl||!msg||!btn)return;
     let mode='login';
     const setMsg=t=>{msg.textContent=t||''};
-    document.querySelectorAll('.tabs button[data-mode]').forEach(b=>b.addEventListener('click',()=>{
+    document.addEventListener('click',e=>{
+      const b=e.target.closest('.tabs button[data-mode]');
+      if(!b)return;
       mode=b.dataset.mode==='register'?'register':'login';
-    },true));
-    form.addEventListener('submit',async e=>{
+    },true);
+    document.addEventListener('submit',async e=>{
+      if(e.target!==form)return;
       e.preventDefault();
+      e.stopPropagation();
       e.stopImmediatePropagation();
-      const username=userEl.value.trim(), password=passEl.value;
+      const username=userEl.value.trim(),password=passEl.value;
       if(!/^[\\p{L}\\p{N}_]{3,24}$/u.test(username))return setMsg('نام کاربری باید ۳ تا ۲۴ حرف، عدد یا _ باشد.');
       if(password.length<4)return setMsg('رمز عبور حداقل ۴ کاراکتر باشد.');
-      btn.disabled=true; setMsg('در حال بررسی...');
+      btn.disabled=true;setMsg('در حال بررسی...');
       try{
         const data=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(password));
         const passwordHash=[...new Uint8Array(data)].map(x=>x.toString(16).padStart(2,'0')).join('');
@@ -42,7 +46,6 @@ const AUTH_FALLBACK = `
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-
     if (url.pathname === "/" || url.pathname === "/index.html") {
       const target = new URL(url);
       target.pathname = "/index.html";
@@ -54,24 +57,16 @@ export default {
       const type = headers.get("content-type") || "";
       if (type.includes("text/html")) {
         const html = await response.text();
-        const patched = html.replace(/<\\/body>\\s*<\\/html>\\s*$/i, AUTH_FALLBACK + "</body></html>");
+        const patched = html.replace(/<\/body>\s*<\/html>\s*$/i, AUTH_FALLBACK + "</body></html>");
         return new Response(patched, { status: response.status, statusText: response.statusText, headers });
       }
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     }
-
-    if (url.pathname !== "/api" && !url.pathname.startsWith("/api/") && url.pathname !== "/ws") {
-      return env.ASSETS.fetch(request);
-    }
-
+    if (url.pathname !== "/api" && !url.pathname.startsWith("/api/") && url.pathname !== "/ws") return env.ASSETS.fetch(request);
     const objectId = env.CHAT_ROOM.idFromName("chat-dorhami-global");
     const room = env.CHAT_ROOM.get(objectId);
     const target = new URL(url);
-
-    if (target.pathname === "/api" || target.pathname.startsWith("/api/")) {
-      target.pathname = target.pathname.replace(/^\/api/, "") || "/";
-    }
-
+    if (target.pathname === "/api" || target.pathname.startsWith("/api/")) target.pathname = target.pathname.replace(/^\/api/, "") || "/";
     return room.fetch(new Request(target, request));
   }
 };
