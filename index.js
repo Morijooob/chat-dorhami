@@ -44,7 +44,6 @@ export default {
             .avatar-presets{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin:10px 0 12px}
             .avatar-preset{width:48px;height:48px;border-radius:15px;border:1px solid rgba(255,255,255,.1);background:#171c32;font-size:25px;cursor:pointer;box-shadow:0 5px 16px rgba(0,0,0,.18)}
             .avatar-preset:hover{transform:translateY(-2px);border-color:#8b6cff;background:#202743}
-            .avatar-custom{width:100%;height:42px;border-radius:12px;background:#181d31;color:#cfd4e8;font-size:11px;cursor:pointer}
             @media(max-width:520px){.avatar-presets{grid-template-columns:repeat(5,1fr)}.avatar-preset{width:44px;height:44px}}
           </style>`, { html: true });
         } })
@@ -74,7 +73,6 @@ export default {
               const grid=document.createElement('div');grid.className='avatar-presets';
               avatars.forEach(e=>{const b=document.createElement('button');b.type='button';b.className='avatar-preset';b.textContent=e;b.onclick=ev=>{ev.preventDefault();ev.stopPropagation();savePreset(e,b)};grid.appendChild(b)});
               wrap.appendChild(grid);
-              const custom=document.createElement('button');custom.type='button';custom.className='avatar-custom';custom.textContent='📷 انتخاب عکس از گالری';custom.onclick=ev=>{ev.preventDefault();ev.stopPropagation();input.click()};wrap.appendChild(custom);
               input.style.display='none';wrap.appendChild(input);
               oldWrap.replaceWith(wrap);
             }
