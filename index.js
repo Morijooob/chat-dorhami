@@ -3,6 +3,10 @@ export { ChatRoom };
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === "/" || url.pathname === "/index.html") {
+      const page = new URL(request.url); page.pathname = "/app-v4.html";
+      return env.ASSETS.fetch(new Request(page, request));
+    }
     if (url.pathname !== "/api" && !url.pathname.startsWith("/api/") && url.pathname !== "/ws") return env.ASSETS.fetch(request);
     const objectId = env.CHAT_ROOM.idFromName("chat-dorhami-global");
     const room = env.CHAT_ROOM.get(objectId);
