@@ -6,36 +6,72 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // Realtime chat is handled by the Durable Object. Do NOT rewrite
-    // private:<userId> room IDs to global: the frontend uses that value
-    // to keep each socket's conversation context isolated.
+    // Private conversations still use the same Durable Object. The socket
+    // itself is tagged as global so the DO membership check succeeds; the
+    // actual private delivery is filtered by sender/receiver IDs.
+    if (url.pathname === "/ws") {
+      const roomId = url.searchParams.get("roomId") || "";
+      if (roomId.startsWith("private:")) url.searchParams.set("roomId", "global");
+    }
 
-    // Inject UI enhancements without changing the existing HTML shell.
+    // UI enhancements are injected into the existing static app.
     if (url.pathname === "/" || url.pathname === "/index.html") {
       const asset = await env.ASSETS.fetch(request);
       return new HTMLRewriter()
         .on("head", { element(el) {
           el.append('<script src="/presets.js" defer></script>', { html: true });
           el.append(`<style>
-            html,body{background:#070816!important}
-            .chat-area{position:relative;overflow:hidden;background:
-              radial-gradient(circle at 12% 18%,rgba(111,76,255,.28),transparent 30%),
-              radial-gradient(circle at 88% 22%,rgba(0,211,255,.20),transparent 28%),
-              radial-gradient(circle at 72% 88%,rgba(226,67,255,.16),transparent 32%),
-              linear-gradient(145deg,#070918 0%,#10152d 45%,#090b1d 100%)!important;
+            html,body{background:#050611!important}
+            .chat-area{position:relative;overflow:hidden!important;background:
+              radial-gradient(circle at 8% 12%,rgba(126,87,255,.42),transparent 27%),
+              radial-gradient(circle at 92% 14%,rgba(0,224,255,.28),transparent 25%),
+              radial-gradient(circle at 78% 82%,rgba(236,61,255,.24),transparent 30%),
+              radial-gradient(circle at 25% 88%,rgba(41,112,255,.18),transparent 27%),
+              linear-gradient(135deg,#050615 0%,#0c1230 42%,#160d2d 72%,#050611 100%)!important;
             }
-            .chat-area:before{content:"";position:absolute;inset:0;pointer-events:none;background:
-              radial-gradient(circle at 50% 45%,rgba(255,255,255,.045),transparent 42%),
-              linear-gradient(115deg,transparent 0%,rgba(255,255,255,.035) 48%,transparent 62%);
-              background-size:auto,220% 100%;animation:dorhamiRoomShine 10s linear infinite;
+            .chat-area:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;background:
+              radial-gradient(circle at 18% 30%,rgba(255,255,255,.12) 0 1px,transparent 2px),
+              radial-gradient(circle at 72% 22%,rgba(255,255,255,.10) 0 1px,transparent 2px),
+              radial-gradient(circle at 55% 72%,rgba(255,255,255,.08) 0 1px,transparent 2px),
+              radial-gradient(circle at 88% 58%,rgba(255,255,255,.09) 0 1px,transparent 2px),
+              linear-gradient(115deg,transparent 0%,rgba(255,255,255,.045) 48%,transparent 62%);
+              background-size:auto,auto,auto,auto,220% 100%;animation:dorhamiRoomShine 12s linear infinite;
             }
-            .conversation{position:relative;background:transparent!important}
-            .conversation>*{position:relative;z-index:1}
-            .messages{background:transparent!important}
-            @keyframes dorhamiRoomShine{from{background-position:0,220% 0}to{background-position:0,-220% 0}}
+            .chat-area:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;background:linear-gradient(180deg,rgba(255,255,255,.035),transparent 28%,rgba(0,0,0,.16));}
+            .conversation,#conversation,.messages,#messages{background:transparent!important;}
+            .conversation{position:relative;z-index:1;}
+            .conversation>*{position:relative;z-index:2}
+            .conversation-header{background:rgba(7,10,24,.58)!important}
+            .message-form{background:rgba(10,13,30,.82)!important}
+            @keyframes dorhamiRoomShine{from{background-position:0,0,0,0,220% 0}to{background-position:0,0,0,0,-220% 0}}
             .room-card{transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease}
             .room-card:hover{transform:translateY(-2px);box-shadow:0 10px 30px rgba(76,67,180,.2)}
+            .avatar-presets{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin:10px 0 12px}
+            .avatar-preset{width:48px;height:48px;border-radius:15px;border:1px solid rgba(255,255,255,.1);background:#171c32;font-size:25px;cursor:pointer;box-shadow:0 5px 16px rgba(0,0,0,.18)}
+            .avatar-preset:hover{transform:translateY(-2px);border-color:#8b6cff;background:#202743}
+            .avatar-custom{width:100%;height:42px;border-radius:12px;background:#181d31;color:#cfd4e8;font-size:11px;cursor:pointer}
+            @media(max-width:520px){.avatar-presets{grid-template-columns:repeat(5,1fr)}.avatar-preset{width:44px;height:44px}}
           </style>`, { html: true });
+        } })
+        .on("body", { element(el) {
+          el.append(`<script>
+          (()=>{
+            const avatars=['😀','😎','🤩','🥳','😇','😉','🤗','😜','🤔','😍','🥰','😘','😈','🤖','👻','🐱','🐼','🦊','🐯','🐸','🦁','🐵','🐨','🐰','🐙','🦄','🐲','🌟','🔥','💜'];
+            function makeAvatarPng(emoji){
+              const c=document.createElement('canvas');c.width=256;c.height=256;const x=c.getContext('2d');
+              const g=x.createLinearGradient(0,0,256,256);g.addColorStop(0,'#7c5cff');g.addColorStop(1,'#20cfff');x.fillStyle=g;x.fillRect(0,0,256,256);
+              x.font='150px sans-serif';x.textAlign='center';x.textBaseline='middle';x.fillText(emoji,128,134);return c.toDataURL('image/png');
+            }
+            async function savePreset(emoji,btn){
+              try{btn.disabled=true;btn.textContent='…';const user=JSON.parse(localStorage.getItem('chat_dorhami_user')||'null');if(!user?.id)throw Error('ابتدا وارد حساب شو.');
+                const r=await fetch('/api/avatar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:user.id,avatar:makeAvatarPng(emoji)})});const d=await r.json();if(!r.ok)throw Error(d.error||'ذخیره آواتار ناموفق بود');
+                localStorage.setItem('chat_dorhami_user',JSON.stringify(d.user));if(typeof updateAvatarUI==='function')updateAvatarUI();const p=document.querySelector('.profile-big');if(p)p.innerHTML='<img class="avatar profile-big avatar-img" src="'+d.user.avatar+'" alt="">';
+              }catch(e){alert(e.message||'ذخیره آواتار ناموفق بود')}finally{btn.disabled=false;btn.textContent=emoji}
+            }
+            function initAvatarPicker(){const wrap=document.querySelector('.avatar-upload'),input=document.getElementById('avatarInput');if(!wrap||!input||wrap.dataset.presetReady)return;wrap.dataset.presetReady='1';const old=wrap.querySelector('.profile-big');wrap.innerHTML='';if(old)wrap.appendChild(old);const title=document.createElement('span');title.textContent='یک آواتار انتخاب کن ✨';wrap.appendChild(title);const grid=document.createElement('div');grid.className='avatar-presets';avatars.forEach(e=>{const b=document.createElement('button');b.type='button';b.className='avatar-preset';b.textContent=e;b.onclick=()=>savePreset(e,b);grid.appendChild(b)});wrap.appendChild(grid);const custom=document.createElement('button');custom.type='button';custom.className='avatar-custom';custom.textContent='📷 انتخاب عکس از گالری';custom.onclick=()=>input.click();wrap.appendChild(custom);wrap.appendChild(input);input.addEventListener('change',()=>{if(typeof chooseAvatar==='function')chooseAvatar(input.files?.[0])},{once:false});}
+            if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initAvatarPicker,{once:true});else initAvatarPicker();
+          })();
+          </script>`, { html: true });
         } })
         .transform(asset);
     }
