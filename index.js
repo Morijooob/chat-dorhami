@@ -1,4 +1,4 @@
-import { ChatRoom } from "./Publicsrc/backend-v5.js";
+import { ChatRoom } from "./Publicsrc/backend-v6.js";
 export { ChatRoom };
 export default {
   async fetch(request, env) {
