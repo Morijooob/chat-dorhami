@@ -9,6 +9,7 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), {
 });
 
 const clean = (value, max = 2000) => String(value ?? "").replace(/\u0000/g, "").trim().slice(0, max);
+const normalizeUsername = value => String(value ?? "").normalize("NFKC").replace(/[\u200B-\u200D\u2060\uFEFF]/g, "").replace(/[\u00A0\u202F]/g, "").trim().toLowerCase();
 const id = () => crypto.randomUUID();
 
 export class ChatRoom extends DurableObject {
@@ -47,10 +48,10 @@ export class ChatRoom extends DurableObject {
     if (url.pathname === "/register" && request.method === "POST") {
       let data;
       try { data = await request.json(); } catch { return json({ ok:false, error:"اطلاعات ثبت‌نام نامعتبر است." },400); }
-      const username = clean(data.username, 24).toLowerCase();
+      const username = normalizeUsername(data.username);
       const passwordHash = clean(data.passwordHash, 128);
-      if (!/^[\\p{L}\\p{N}_]{3,24}$/u.test(username)) {
-        return json({ ok:false, error:"نام کاربری باید ۳ تا ۲۴ کاراکتر باشد و فاصله نداشته باشد." },400);
+      if (!/^[\p{L}\p{N}_]{3,24}$/u.test(username)) {
+        return json({ ok:false, error:"نام کاربری باید ۳ تا ۲۴ کاراکتر باشد و فاصله نداشته باشد. فقط حروف، عدد و _ مجاز است." },400);
       }
       if (!/^[a-f0-9]{64}$/i.test(passwordHash)) {
         return json({ ok:false, error:"رمز عبور معتبر نیست. دوباره تلاش کن." },400);
@@ -65,7 +66,7 @@ export class ChatRoom extends DurableObject {
     if (url.pathname === "/login" && request.method === "POST") {
       let data;
       try { data = await request.json(); } catch { return json({ ok:false, error:"اطلاعات ورود نامعتبر است." },400); }
-      const username = clean(data.username,24).toLowerCase();
+      const username = normalizeUsername(data.username);
       const passwordHash = clean(data.passwordHash,128);
       const result = this.ctx.storage.sql.exec(`SELECT id,username FROM users WHERE username=? AND password_hash=? LIMIT 1`, username, passwordHash).toArray();
       if (!result.length) return json({ ok:false, error:"نام کاربری یا رمز عبور اشتباه است." },401);
@@ -73,7 +74,7 @@ export class ChatRoom extends DurableObject {
     }
 
     if (url.pathname === "/users") {
-      const q = clean(url.searchParams.get("q"),24).toLowerCase();
+      const q = normalizeUsername(url.searchParams.get("q"));
       const users = this.ctx.storage.sql.exec(`SELECT id,username,created_at FROM users WHERE username LIKE ? ORDER BY username LIMIT 50`, `%${q}%`).toArray();
       return json({ users });
     }
@@ -105,7 +106,7 @@ export class ChatRoom extends DurableObject {
 
     if (url.pathname === "/ws") {
       if (request.headers.get("Upgrade") !== "websocket") return new Response("WebSocket required",{status:426});
-      const username = clean(url.searchParams.get("username"),24) || "مهمان";
+      const username = normalizeUsername(url.searchParams.get("username")) || "مهمان";
       const userId = clean(url.searchParams.get("userId"),100);
       const roomId = clean(url.searchParams.get("roomId"),100) || "global";
       const pair = new WebSocketPair();
@@ -131,7 +132,7 @@ export class ChatRoom extends DurableObject {
 
     const attachment = ws.deserializeAttachment() || {};
     const userId = clean(attachment.userId,100);
-    const username = clean(attachment.username,24) || "مهمان";
+    const username = normalizeUsername(attachment.username) || "مهمان";
     const roomId = clean(attachment.roomId,100) || "global";
     const body = clean(data.body,2000);
     if (!body) return;
