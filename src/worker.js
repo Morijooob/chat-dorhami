@@ -79,8 +79,11 @@ export class Dorhami {
     const body = await readJson(request);
     const username = cleanName(body.username);
     const password = String(body.password || '');
+    if (!username || !password) return json({ error: 'نام کاربری و رمز عبور را وارد کن.' }, 400);
     const user = this.state.storage.sql.exec('SELECT id,username,role,password_hash,salt FROM users WHERE username=?', username).one();
-    if (!user || !(await safeEqual(user.password_hash, await derive(password, fromB64(user.salt))))) return json({ error: 'نام کاربری یا رمز عبور اشتباه است.' }, 401);
+    if (!user) return json({ error: 'نام کاربری یا رمز عبور اشتباه است.' }, 401);
+    const candidate = await derive(password, fromB64(user.salt));
+    if (!safeEqual(user.password_hash, candidate)) return json({ error: 'نام کاربری یا رمز عبور اشتباه است.' }, 401);
     const token = await this.createSession(user.id);
     return withCookie(json({ ok: true, user: { id: user.id, username: user.username, role: user.role } }), token);
   }
@@ -103,7 +106,7 @@ export class Dorhami {
   async logout(request) {
     const token = cookie(request, COOKIE);
     if (token) this.state.storage.sql.exec('DELETE FROM sessions WHERE token_hash=?', await sha256(token));
-    return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json', 'Set-Cookie': clearCookie() } });
+    return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Set-Cookie': clearCookie() } });
   }
 
   async me(request) {
@@ -129,14 +132,15 @@ export class Dorhami {
     this.clients.set(key, { ws: server, user });
     server.addEventListener('message', async e => {
       try {
-        const msg = JSON.parse(e.data);
+        const msg = JSON.parse(String(e.data));
         if (msg.type === 'history') return this.sendHistory(server);
         if (msg.type === 'ping') return server.send(JSON.stringify({ type: 'pong' }));
         if (msg.type === 'message') await this.broadcastMessage(user, msg.body);
       } catch {}
     });
-    server.addEventListener('close', () => { this.clients.delete(key); this.broadcastPresence(); });
-    server.addEventListener('error', () => { this.clients.delete(key); });
+    const remove = () => { this.clients.delete(key); this.broadcastPresence(); };
+    server.addEventListener('close', remove);
+    server.addEventListener('error', remove);
     server.send(JSON.stringify({ type: 'ready', user: { id: user.id, username: user.username, role: user.role } }));
     this.broadcastPresence();
     return new Response(null, { status: 101, webSocket: client });
@@ -152,7 +156,7 @@ export class Dorhami {
     if (!body || body.length > 2000) return;
     const now = Date.now();
     this.state.storage.sql.exec('INSERT INTO messages(room,user_id,username,body,created_at) VALUES(?,?,?,?,?)', ROOM, user.id, user.username, body, now);
-    const row = this.state.storage.sql.exec('SELECT id,username,body,created_at FROM messages ORDER BY id DESC LIMIT 1').one();
+    const row = this.state.storage.sql.exec('SELECT id,username,body,created_at FROM messages WHERE room=? ORDER BY id DESC LIMIT 1', ROOM).one();
     this.broadcast({ type: 'message', message: row });
   }
 
@@ -176,7 +180,7 @@ function b64(a) { let s=''; for (const x of a) s += String.fromCharCode(x); retu
 function fromB64(s) { const raw = atob(s); return Uint8Array.from(raw, c => c.charCodeAt(0)); }
 async function sha256(s) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join(''); }
 async function derive(password, salt) { const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']); const bits = await crypto.subtle.deriveBits({ name:'PBKDF2', salt, iterations:120000, hash:'SHA-256' }, key, 256); return b64(new Uint8Array(bits)); }
-async function safeEqual(a,b) { const x=String(a),y=String(b); if(x.length!==y.length)return false; let d=0; for(let i=0;i<x.length;i++)d|=x.charCodeAt(i)^y.charCodeAt(i); return d===0; }
+function safeEqual(a,b) { const x=String(a),y=String(b); if(x.length!==y.length)return false; let d=0; for(let i=0;i<x.length;i++)d|=x.charCodeAt(i)^y.charCodeAt(i); return d===0; }
 function cookie(r, name) { const h=r.headers.get('Cookie')||''; const m=h.match(new RegExp('(?:^|;\\s*)'+name+'=([^;]+)')); return m ? decodeURIComponent(m[1]) : null; }
 function withCookie(response, token) { const h=new Headers(response.headers); h.set('Set-Cookie', `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`); return new Response(response.body,{status:response.status,headers:h}); }
 function clearCookie() { return `${COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`; }
