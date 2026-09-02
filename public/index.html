@@ -1,41 +1,43 @@
 <!doctype html>
 <html lang="fa" dir="rtl">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#090b16">
-  <meta name="description" content="چت دورهمی؛ یک جای خودمونی برای گپ و آشنایی">
-  <title>چت دورهمی</title>
-  <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#080a14"><meta name="description" content="چت دورهمی؛ گپ، آشنایی و گفتگو">
+  <title>چت دورهمی</title><link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="background-glow glow-one"></div><div class="background-glow glow-two"></div>
-  <main class="app">
-    <section id="auth" class="auth-screen"><div class="auth-card">
-      <div class="brand"><div class="brand-icon">💬</div><div><div class="brand-name">چت دورهمی</div><div class="brand-subtitle">گپ بزن، آشنا شو، دورهم باش</div></div></div>
-      <div class="welcome"><h1>خوش اومدی 👋</h1><p>برای ورود به دورهمی وارد حساب خودت شو.</p></div>
-      <div class="tabs"><button type="button" class="active" data-mode="login">ورود</button><button type="button" data-mode="register">ثبت‌نام</button></div>
-      <form id="authForm" class="auth-form">
-        <label><span>نام کاربری</span><input id="username" placeholder="مثلاً mori123" autocomplete="username" autocapitalize="none" required></label>
-        <label><span>رمز عبور</span><input id="password" type="password" placeholder="حداقل ۸ کاراکتر" autocomplete="current-password" required></label>
-        <button class="primary" type="submit">ورود به دورهمی</button>
-      </form>
-      <div id="authError" class="error"></div><div class="auth-footer">🔐 اطلاعات حساب تو خصوصی می‌مونه</div>
-    </div></section>
-    <section id="chat" class="chat hidden">
-      <aside class="sidebar"><header class="sidebar-header"><div class="profile-mini"><div class="avatar me-avatar">م</div><div class="profile-text"><strong>چت دورهمی</strong><small id="me"></small></div></div><button id="logout" class="icon-button" title="خروج">⎋</button></header>
-        <div class="sidebar-title"><span>گفتگوها</span><span class="online-badge">● آنلاین</span></div>
-        <button id="publicRoom" type="button" class="room-card"><div class="room-icon">🌟</div><div class="room-info"><strong>اتاق دورهمی</strong><small>گفتگوی عمومی</small></div><span class="room-arrow">‹</span></button>
-        <div class="search-box"><span>⌕</span><input id="search" type="search" placeholder="جستجوی کاربران..." autocomplete="off"></div>
-        <div class="section-title">گفتگوی خصوصی</div><div id="users" class="users"></div>
-      </aside>
-      <article class="chat-area"><div id="empty" class="empty"><div class="empty-logo">💬</div><h2>به چت دورهمی خوش اومدی</h2><p>یک نفر را برای گفتگوی خصوصی انتخاب کن یا وارد اتاق عمومی شو.</p><button class="empty-action" onclick="document.getElementById('publicRoom').click()">ورود به اتاق دورهمی</button></div>
-        <div id="conversation" class="conversation hidden"><header class="conversation-header"><div class="conversation-user"><div class="avatar conversation-avatar">💬</div><div><strong id="chatWith">چت</strong><small id="status">آفلاین</small></div></div><button id="backBtn" class="back" type="button">بازگشت</button></header>
-          <div id="messages" class="messages"></div><form id="sendForm" class="message-form"><input id="message" placeholder="پیامت را بنویس..." maxlength="2000" autocomplete="off"><button type="submit" class="send-button"><span>ارسال</span> ➤</button></form>
-        </div>
-      </article>
-    </section>
-  </main>
-  <script src="app-v2.js"></script>
-</body>
-</html>
+<div class="background-glow glow-one"></div><div class="background-glow glow-two"></div>
+<main class="app">
+<section id="auth" class="auth-screen"><div class="auth-card">
+  <div class="brand"><div class="brand-icon">💬</div><div><div class="brand-name">چت دورهمی</div><div class="brand-subtitle">گپ بزن، آشنا شو، دورهم باش</div></div></div>
+  <div class="welcome"><h1>خوش اومدی 👋</h1><p>برای ورود به دورهمی وارد حساب خودت شو.</p></div>
+  <div class="tabs"><button type="button" class="active" data-mode="login">ورود</button><button type="button" data-mode="register">ثبت‌نام</button></div>
+  <form id="authForm" class="auth-form"><label><span>نام کاربری</span><input id="username" placeholder="مثلاً mori123" autocomplete="username" autocapitalize="none" required></label><label><span>رمز عبور</span><input id="password" type="password" placeholder="حداقل ۸ کاراکتر" autocomplete="current-password" required></label><button class="primary" type="submit">ورود به دورهمی</button></form>
+  <div id="authError" class="error"></div><div class="auth-footer">🔐 گفتگوی تو فقط برای خودت و مخاطبت است</div>
+</div></section>
+
+<section id="chat" class="chat hidden">
+  <aside class="sidebar">
+    <header class="sidebar-header"><div class="profile-mini"><div class="avatar me-avatar">م</div><div class="profile-text"><strong>چت دورهمی</strong><small id="me"></small></div></div><button id="logout" class="icon-button" title="خروج">⎋</button></header>
+    <div class="welcome-mini"><div><b>سلام رفیق 👋</b><span>امروز با کی گپ می‌زنی؟</span></div><span class="online-dot"></span></div>
+    <div class="side-nav"><button class="nav-item active"><span>💬</span>گفتگوها</button><button class="nav-item"><span>👥</span>کاربران</button><button class="nav-item"><span>⭐</span>VIP <em>به‌زودی</em></button></div>
+    <div class="section-head"><span>اتاق‌های گفتگو</span><button id="newRoom" title="ساخت اتاق">＋</button></div>
+    <div id="rooms" class="rooms"></div>
+    <div class="section-head history-head"><span>سوابق چت</span><button id="refreshHistory" title="به‌روزرسانی">↻</button></div>
+    <div id="history" class="history"></div>
+    <div class="sidebar-bottom"><button id="profileBtn">👤 <span>پروفایل من</span></button><button id="settingsBtn">⚙️</button></div>
+  </aside>
+  <article class="chat-area">
+    <div id="empty" class="empty"><div class="empty-logo">💬</div><div class="eyebrow">DORHAMI</div><h2>جای تو در دورهمی خالی بود</h2><p>از اتاق‌ها یکی را انتخاب کن، یا با یک کاربر گفتگوی خصوصی را شروع کن.</p><div class="quick-actions"><button class="empty-action" onclick="document.querySelector('#rooms button')?.click()">🚀 ورود به اتاق</button><button class="empty-action secondary" onclick="document.querySelector('.nav-item:nth-child(2)')?.click()">👥 پیدا کردن آدم‌ها</button></div></div>
+    <div id="conversation" class="conversation hidden">
+      <header class="conversation-header"><div class="conversation-user"><button id="backBtn" class="back" type="button">→</button><div class="avatar conversation-avatar">💬</div><div><strong id="chatWith">چت</strong><small id="status">آفلاین</small></div></div><div class="conversation-tools"><button title="جستجو">⌕</button><button title="بیشتر">⋮</button></div></header>
+      <div id="messages" class="messages"></div>
+      <form id="sendForm" class="message-form"><button type="button" id="emojiBtn" class="tool-btn">☺</button><input id="message" placeholder="پیامت را بنویس..." maxlength="2000" autocomplete="off"><button type="submit" class="send-button"><span>ارسال</span> ➤</button></form>
+    </div>
+  </article>
+</section>
+</main>
+<div id="roomModal" class="modal hidden"><div class="modal-card"><button class="modal-close" data-close="roomModal">×</button><div class="modal-icon">🏠</div><h3>ساخت اتاق جدید</h3><p>یک فضای جدید برای گپ دوستانه بساز.</p><form id="roomForm"><input id="roomName" maxlength="40" placeholder="نام اتاق، مثلاً گیمرها 🎮" required><input id="roomDescription" maxlength="120" placeholder="توضیح کوتاه اتاق"><button class="primary" type="submit">ساخت اتاق</button></form><div id="roomError" class="error"></div></div></div>
+<div id="profileModal" class="modal hidden"><div class="modal-card"><button class="modal-close" data-close="profileModal">×</button><div class="modal-icon">👤</div><h3>پروفایل من</h3><div class="profile-big avatar">م</div><strong id="profileName">@user</strong><p>عضو چت دورهمی</p><button class="primary" data-close="profileModal">باشه</button></div></div>
+<script src="app-v2.js"></script>
+</body></html>
