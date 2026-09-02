@@ -1,16 +1,8 @@
-import { ChatRoom } from "./Publicsrc/index-v3.js";
+import { ChatRoom } from "./Publicsrc/index-v4.js";
 export { ChatRoom };
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === "/" || url.pathname === "/index.html") {
-      const asset = await env.ASSETS.fetch(request);
-      return new HTMLRewriter()
-        .on('script', { element(el) {
-          if (el.getAttribute('src') === 'app-v2.js' || el.getAttribute('src') === '/app-v2.js') el.setAttribute('src', '/app-v3.js');
-        }})
-        .transform(asset);
-    }
     if (url.pathname !== "/api" && !url.pathname.startsWith("/api/") && url.pathname !== "/ws") return env.ASSETS.fetch(request);
     const objectId = env.CHAT_ROOM.idFromName("chat-dorhami-global");
     const room = env.CHAT_ROOM.get(objectId);
