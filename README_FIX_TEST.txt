@@ -1,0 +1,1 @@
+Temporary deployment validation marker for the Cloudflare Worker repair branch.
