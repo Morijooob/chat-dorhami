@@ -1,0 +1,90 @@
+import { DurableObject } from "cloudflare:workers";
+
+const out=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json;charset=UTF-8","cache-control":"no-store"}});
+const s=(v,max=2000)=>String(v??"").replace(/\u0000/g,"").trim().slice(0,max);
+const username=v=>s(v,50).normalize("NFKC").replace(/[\u200B-\u200D\u2060\uFEFF]/g,"").replace(/[\u00A0\u202F]/g,"").toLowerCase();
+const uid=()=>crypto.randomUUID();
+
+export class ChatRoom extends DurableObject {
+  constructor(ctx,env){
+    super(ctx,env); this.ctx=ctx;
+    ctx.blockConcurrencyWhile(async()=>{
+      const q=ctx.storage.sql;
+      q.exec(`CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,created_at INTEGER NOT NULL,avatar TEXT,vip INTEGER NOT NULL DEFAULT 0,role TEXT NOT NULL DEFAULT 'user');
+      CREATE TABLE IF NOT EXISTS rooms(id TEXT PRIMARY KEY,name TEXT UNIQUE NOT NULL,description TEXT NOT NULL,created_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS room_members(room_id TEXT NOT NULL,user_id TEXT NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(room_id,user_id));
+      CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,sender_id TEXT NOT NULL,receiver_id TEXT,room_id TEXT,body TEXT,message_type TEXT NOT NULL DEFAULT 'text',media TEXT,created_at INTEGER NOT NULL,read_at INTEGER);`);
+      for(const x of ["ALTER TABLE users ADD COLUMN avatar TEXT","ALTER TABLE users ADD COLUMN vip INTEGER NOT NULL DEFAULT 0","ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'","ALTER TABLE messages ADD COLUMN receiver_id TEXT","ALTER TABLE messages ADD COLUMN room_id TEXT","ALTER TABLE messages ADD COLUMN message_type TEXT NOT NULL DEFAULT 'text'","ALTER TABLE messages ADD COLUMN media TEXT","ALTER TABLE messages ADD COLUMN read_at INTEGER"]){try{q.exec(x)}catch{}}
+      q.exec("INSERT OR IGNORE INTO rooms(id,name,description,created_at) VALUES('global','اتاق دورهمی','گفتگوی عمومی همه کاربران',?)",Date.now());
+      const admin=q.exec("SELECT id FROM users WHERE role='admin' LIMIT 1").toArray()[0];
+      if(!admin){const first=q.exec("SELECT id FROM users ORDER BY created_at LIMIT 1").toArray()[0];if(first)q.exec("UPDATE users SET role='admin' WHERE id=?",first.id)}
+    });
+  }
+  user(id){return this.ctx.storage.sql.exec("SELECT id,username,created_at,avatar,vip,role FROM users WHERE id=? LIMIT 1",s(id,100)).toArray()[0]||null}
+  room(id){return this.ctx.storage.sql.exec("SELECT id,name,description,created_at FROM rooms WHERE id=? LIMIT 1",s(id,100)).toArray()[0]||null}
+  member(r,u){return r==='global'||this.ctx.storage.sql.exec("SELECT 1 FROM room_members WHERE room_id=? AND user_id=? LIMIT 1",r,u).toArray().length>0}
+  key(a,b){return[a,b].sort().join(":")}
+  select(){return "SELECT m.id,m.sender_id,m.receiver_id,m.room_id,m.body,m.message_type,m.media,m.created_at,m.read_at,u.username,u.avatar FROM messages m LEFT JOIN users u ON u.id=m.sender_id"}
+  send(ws,d){try{ws.send(JSON.stringify(d))}catch{}}
+  sockets(){return this.ctx.getWebSockets()}
+  privateBroadcast(k,d){const text=JSON.stringify(d);for(const ws of this.sockets()){const a=ws.deserializeAttachment()||{};if(a.privateKey===k)try{ws.send(text)}catch{}}}
+  roomBroadcast(r,d){const text=JSON.stringify(d);for(const ws of this.sockets()){const a=ws.deserializeAttachment()||{};if(a.roomId===r)try{ws.send(text)}catch{}}}
+
+  async fetch(req){
+    const u=new URL(req.url),p=u.pathname;
+    try{
+      if(p==='/register'&&req.method==='POST'){
+        let d;try{d=await req.json()}catch{return out({ok:false,error:'اطلاعات ثبت‌نام نامعتبر است.'},400)}
+        const n=username(d.username),ph=s(d.passwordHash,128);
+        if(!/^[\p{L}\p{N}_]{3,24}$/u.test(n))return out({ok:false,error:'نام کاربری باید ۳ تا ۲۴ کاراکتر باشد.'},400);
+        if(!/^[a-f0-9]{64}$/i.test(ph))return out({ok:false,error:'رمز عبور معتبر نیست.'},400);
+        if(this.ctx.storage.sql.exec("SELECT id FROM users WHERE username=?",n).toArray().length)return out({ok:false,error:'این نام کاربری قبلاً ثبت شده است.'},409);
+        const first=this.ctx.storage.sql.exec("SELECT id FROM users LIMIT 1").toArray().length===0,id=uid();
+        this.ctx.storage.sql.exec("INSERT INTO users(id,username,password_hash,created_at,avatar,vip,role) VALUES(?,?,?,?,?,?,?)",id,n,ph,Date.now(),null,0,first?'admin':'user');
+        return out({ok:true,user:this.user(id)},201);
+      }
+      if(p==='/login'&&req.method==='POST'){
+        let d;try{d=await req.json()}catch{return out({ok:false,error:'اطلاعات ورود نامعتبر است.'},400)}
+        const n=username(d.username),ph=s(d.passwordHash,128),x=this.ctx.storage.sql.exec("SELECT id,username,created_at,avatar,vip,role FROM users WHERE username=? AND password_hash=? LIMIT 1",n,ph).toArray()[0];
+        return x?out({ok:true,user:x}):out({ok:false,error:'نام کاربری یا رمز عبور اشتباه است.'},401);
+      }
+      if(p==='/me'||p==='/profile'){const x=this.user(u.searchParams.get('userId'));return x?out({ok:true,user:x}):out({ok:false,error:'کاربر پیدا نشد.'},404)}
+      if(p==='/avatar'&&req.method==='POST'){
+        let d;try{d=await req.json()}catch{return out({ok:false,error:'اطلاعات آواتار نامعتبر است.'},400)}
+        const id=s(d.userId,100),a=String(d.avatar||'');if(!this.user(id))return out({ok:false,error:'کاربر معتبر نیست.'},401);
+        if(a&&(!/^data:image\/(png|jpeg|jpg|webp);base64,/i.test(a)||a.length>700000))return out({ok:false,error:'آواتار نامعتبر یا بزرگ است.'},400);
+        this.ctx.storage.sql.exec("UPDATE users SET avatar=? WHERE id=?",a||null,id);return out({ok:true,user:this.user(id)});
+      }
+      if(p==='/users'){const q=username(u.searchParams.get('q'));return out({users:this.ctx.storage.sql.exec("SELECT id,username,created_at,avatar,vip,role FROM users WHERE username LIKE ? ORDER BY username LIMIT 50",`%${q}%`).toArray()})}
+      if(p==='/rooms'){const id=s(u.searchParams.get('userId'),100);return out({rooms:this.ctx.storage.sql.exec("SELECT r.id,r.name,r.description,r.created_at,CASE WHEN r.id='global' THEN 1 ELSE 0 END is_public FROM rooms r WHERE r.id='global' OR EXISTS(SELECT 1 FROM room_members m WHERE m.room_id=r.id AND m.user_id=?) ORDER BY CASE WHEN r.id='global' THEN 0 ELSE 1 END,r.created_at DESC",id).toArray()})}
+      if(p==='/room-messages'){const r=s(u.searchParams.get('roomId'),100)||'global',id=s(u.searchParams.get('userId'),100);if(!this.room(r)||!this.member(r,id))return out({ok:false,error:'اتاق پیدا نشد یا عضو نیستید.'},403);return out({messages:this.ctx.storage.sql.exec(`${this.select()} WHERE m.room_id=? ORDER BY m.created_at DESC LIMIT 100`,r).toArray().reverse()})}
+      if(p==='/private-messages'){const a=s(u.searchParams.get('userId'),100),b=s(u.searchParams.get('otherId'),100);if(!this.user(a)||!this.user(b))return out({ok:false,error:'کاربر پیدا نشد.'},404);return out({messages:this.ctx.storage.sql.exec(`${this.select()} WHERE m.room_id IS NULL AND ((m.sender_id=? AND m.receiver_id=?) OR (m.sender_id=? AND m.receiver_id=?)) ORDER BY m.created_at LIMIT 100`,a,b,b,a).toArray()})}
+      if(p==='/recent-chats'){const id=s(u.searchParams.get('userId'),100);return out({chats:this.ctx.storage.sql.exec(`SELECT x.other_id,u.username,u.avatar,u.vip,x.body,x.message_type,x.created_at FROM(SELECT CASE WHEN sender_id=? THEN receiver_id ELSE sender_id END other_id,body,message_type,created_at,ROW_NUMBER() OVER(PARTITION BY CASE WHEN sender_id=? THEN receiver_id ELSE sender_id END ORDER BY created_at DESC) rn FROM messages WHERE room_id IS NULL AND(sender_id=? OR receiver_id=?))x LEFT JOIN users u ON u.id=x.other_id WHERE x.rn=1 ORDER BY x.created_at DESC LIMIT 30`,id,id,id,id).toArray()})}
+      if(p==='/create-room'&&req.method==='POST'){
+        let d;try{d=await req.json()}catch{return out({ok:false,error:'اطلاعات اتاق نامعتبر است.'},400)}
+        const creator=s(d.creatorId,100),name=s(d.name,80),desc=s(d.description,300);const uo=this.user(creator);if(!uo)return out({ok:false,error:'کاربر معتبر نیست.'},401);if(!name)return out({ok:false,error:'نام اتاق را وارد کنید.'},400);const id=uid();try{this.ctx.storage.sql.exec("INSERT INTO rooms(id,name,description,created_at) VALUES(?,?,?,?)",id,name,desc||'اتاق جدید دورهمی',Date.now());this.ctx.storage.sql.exec("INSERT INTO room_members(room_id,user_id,created_at) VALUES(?,?,?)",id,creator,Date.now())}catch{return out({ok:false,error:'نام اتاق تکراری است.'},409)}return out({ok:true,room:this.room(id)},201);
+      }
+      if(p==='/room-members'&&req.method==='POST'){let d;try{d=await req.json()}catch{return out({ok:false,error:'اطلاعات نامعتبر است.'},400)}const r=s(d.roomId,100),creator=s(d.userId,100),member=s(d.memberId,100);if(!this.user(creator)||!this.user(member)||!this.room(r))return out({ok:false,error:'اطلاعات نامعتبر است.'},400);if(!this.member(r,creator))return out({ok:false,error:'عضو اتاق نیستید.'},403);this.ctx.storage.sql.exec("INSERT OR IGNORE INTO room_members(room_id,user_id,created_at) VALUES(?,?,?)",r,member,Date.now());return out({ok:true})}
+      if(p==='/admin/stats'||p==='/admin/users'){const id=s(u.searchParams.get('userId'),100),me=this.user(id);if(!me||me.role!=='admin')return out({ok:false,error:'دسترسی مدیریت ندارید.'},403);if(p==='/admin/stats')return out({ok:true,users:this.ctx.storage.sql.exec("SELECT COUNT(*) c FROM users").toArray()[0].c,messages:this.ctx.storage.sql.exec("SELECT COUNT(*) c FROM messages").toArray()[0].c,rooms:this.ctx.storage.sql.exec("SELECT COUNT(*) c FROM rooms").toArray()[0].c});return out({ok:true,users:this.ctx.storage.sql.exec("SELECT id,username,created_at,avatar,vip,role FROM users ORDER BY created_at").toArray()})}
+      if(p==='/ws'){
+        if(req.headers.get('Upgrade')?.toLowerCase()!=='websocket')return new Response('WebSocket required',{status:426});
+        const id=s(u.searchParams.get('userId'),100),name=username(u.searchParams.get('username')),rid=s(u.searchParams.get('roomId'),200)||'global',me=this.user(id);if(!me||me.username!==name)return out({ok:false,error:'نشست کاربر معتبر نیست.'},401);
+        const priv=rid.startsWith('private:'),other=priv?s(rid.slice(8),100):null;if(priv){if(!this.user(other)||other===id)return out({ok:false,error:'گفتگوی خصوصی نامعتبر است.'},400)}else if(!this.room(rid)||!this.member(rid,id))return out({ok:false,error:'اتاق پیدا نشد یا عضو نیستید.'},403);
+        const pair=new WebSocketPair(),ws=pair[1];this.ctx.acceptWebSocket(ws);ws.serializeAttachment({userId:id,username:name,roomId:priv?null:rid,privateKey:priv?this.key(id,other):null,vip:!!me.vip,avatar:me.avatar||null});
+        const messages=priv?this.ctx.storage.sql.exec(`${this.select()} WHERE m.room_id IS NULL AND ((m.sender_id=? AND m.receiver_id=?) OR (m.sender_id=? AND m.receiver_id=?)) ORDER BY m.created_at DESC LIMIT 100`,id,other,other,id).toArray().reverse():this.ctx.storage.sql.exec(`${this.select()} WHERE m.room_id=? ORDER BY m.created_at DESC LIMIT 100`,rid).toArray().reverse();
+        this.send(ws,{type:'history',messages});return new Response(null,{status:101,webSocket:pair[0]});
+      }
+      return out({ok:true,service:'chat-dorhami',version:'6-auth-stable'});
+    }catch(e){return out({ok:false,error:'خطای داخلی سرور',detail:String(e?.message||e)},500)}
+  }
+
+  async webSocketMessage(ws,raw){
+    let d;try{d=JSON.parse(typeof raw==='string'?raw:new TextDecoder().decode(raw))}catch{return this.send(ws,{type:'error',message:'پیام نامعتبر است.'})}
+    const a=ws.deserializeAttachment()||{},id=a.userId;if(!this.user(id))return;
+    if(d.type==='mark_read'){const m=this.ctx.storage.sql.exec("SELECT id,sender_id,receiver_id,read_at FROM messages WHERE id=?",s(d.messageId,100)).toArray()[0];if(m&&m.receiver_id===id&&!m.read_at){const t=Date.now();this.ctx.storage.sql.exec("UPDATE messages SET read_at=? WHERE id=?",t,m.id);this.privateBroadcast(this.key(id,m.sender_id),{type:'message_read',messageId:m.id,read_at:t})}return}
+    if(d.type==='private_message'){const to=s(d.receiverId,100),body=s(d.body);if(!this.user(to)||to===id||!body)return;const m={id:uid(),sender_id:id,receiver_id:to,room_id:null,body,message_type:'text',media:null,created_at:Date.now(),read_at:null,username:a.username,avatar:a.avatar};this.ctx.storage.sql.exec("INSERT INTO messages(id,sender_id,receiver_id,room_id,body,message_type,media,created_at,read_at) VALUES(?,?,?,?,?,?,?,?,?)",m.id,id,to,null,body,'text',null,m.created_at,null);const k=this.key(id,to);this.privateBroadcast(k,{type:'private_message',message:m});this.privateBroadcast(k,{type:'message_delivered',messageId:m.id});return}
+    if(d.type==='room_message'){const r=a.roomId,body=s(d.body);if(!r||!this.member(r,id)||!body)return;const m={id:uid(),sender_id:id,receiver_id:null,room_id:r,body,message_type:'text',media:null,created_at:Date.now(),read_at:null,username:a.username,avatar:a.avatar};this.ctx.storage.sql.exec("INSERT INTO messages(id,sender_id,receiver_id,room_id,body,message_type,media,created_at,read_at) VALUES(?,?,?,?,?,?,?,?,?)",m.id,id,null,r,body,'text',null,m.created_at,null);this.roomBroadcast(r,{type:'room_message',message:m})}
+  }
+  async webSocketClose(){}
+  async webSocketError(){}
+}
