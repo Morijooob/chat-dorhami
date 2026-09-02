@@ -1,28 +1,11 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "chat-dorhami",
-  "main": "index.js",
-  "compatibility_date": "2026-09-01",
-
+  "name": "dorhami-mon",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-09-02",
   "durable_objects": {
-    "bindings": [
-      {
-        "name": "CHAT_ROOM",
-        "class_name": "ChatRoom"
-      }
-    ]
+    "bindings": [{ "name": "DORHAMI", "class_name": "Dorhami" }]
   },
-
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": [
-        "ChatRoom"
-      ]
-    }
-  ],
-
-  "assets": {
-    "directory": "./public"
-  }
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Dorhami"] }],
+  "assets": { "directory": "./public" }
 }
