@@ -6,15 +6,11 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // Private conversations still use the same Durable Object. The socket
-    // itself is tagged as global so the DO membership check succeeds; the
-    // actual private delivery is filtered by sender/receiver IDs.
     if (url.pathname === "/ws") {
       const roomId = url.searchParams.get("roomId") || "";
       if (roomId.startsWith("private:")) url.searchParams.set("roomId", "global");
     }
 
-    // UI enhancements are injected into the existing static app.
     if (url.pathname === "/" || url.pathname === "/index.html") {
       const asset = await env.ASSETS.fetch(request);
       return new HTMLRewriter()
@@ -38,8 +34,8 @@ export default {
               background-size:auto,auto,auto,auto,220% 100%;animation:dorhamiRoomShine 12s linear infinite;
             }
             .chat-area:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;background:linear-gradient(180deg,rgba(255,255,255,.035),transparent 28%,rgba(0,0,0,.16));}
-            .conversation,#conversation,.messages,#messages{background:transparent!important;}
-            .conversation{position:relative;z-index:1;}
+            .conversation,#conversation,.messages,#messages{background:transparent!important}
+            .conversation{position:relative;z-index:1}
             .conversation>*{position:relative;z-index:2}
             .conversation-header{background:rgba(7,10,24,.58)!important}
             .message-form{background:rgba(10,13,30,.82)!important}
@@ -68,7 +64,7 @@ export default {
                 localStorage.setItem('chat_dorhami_user',JSON.stringify(d.user));if(typeof updateAvatarUI==='function')updateAvatarUI();const p=document.querySelector('.profile-big');if(p)p.innerHTML='<img class="avatar profile-big avatar-img" src="'+d.user.avatar+'" alt="">';
               }catch(e){alert(e.message||'ذخیره آواتار ناموفق بود')}finally{btn.disabled=false;btn.textContent=emoji}
             }
-            function initAvatarPicker(){const wrap=document.querySelector('.avatar-upload'),input=document.getElementById('avatarInput');if(!wrap||!input||wrap.dataset.presetReady)return;wrap.dataset.presetReady='1';const old=wrap.querySelector('.profile-big');wrap.innerHTML='';if(old)wrap.appendChild(old);const title=document.createElement('span');title.textContent='یک آواتار انتخاب کن ✨';wrap.appendChild(title);const grid=document.createElement('div');grid.className='avatar-presets';avatars.forEach(e=>{const b=document.createElement('button');b.type='button';b.className='avatar-preset';b.textContent=e;b.onclick=()=>savePreset(e,b);grid.appendChild(b)});wrap.appendChild(grid);const custom=document.createElement('button');custom.type='button';custom.className='avatar-custom';custom.textContent='📷 انتخاب عکس از گالری';custom.onclick=()=>input.click();wrap.appendChild(custom);wrap.appendChild(input);input.addEventListener('change',()=>{if(typeof chooseAvatar==='function')chooseAvatar(input.files?.[0])},{once:false});}
+            function initAvatarPicker(){const wrap=document.querySelector('.avatar-upload'),input=document.getElementById('avatarInput');if(!wrap||!input||wrap.dataset.presetReady)return;wrap.dataset.presetReady='1';const old=wrap.querySelector('.profile-big');wrap.innerHTML='';if(old)wrap.appendChild(old);const title=document.createElement('span');title.textContent='یک آواتار انتخاب کن ✨';wrap.appendChild(title);const grid=document.createElement('div');grid.className='avatar-presets';avatars.forEach(e=>{const b=document.createElement('button');b.type='button';b.className='avatar-preset';b.textContent=e;b.onclick=()=>savePreset(e,b);grid.appendChild(b)});wrap.appendChild(grid);const custom=document.createElement('button');custom.type='button';custom.className='avatar-custom';custom.textContent='📷 انتخاب عکس از گالری';custom.onclick=()=>input.click();wrap.appendChild(custom);wrap.appendChild(input);}
             if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initAvatarPicker,{once:true});else initAvatarPicker();
           })();
           </script>`, { html: true });
@@ -76,22 +72,14 @@ export default {
         .transform(asset);
     }
 
-    if (
-      url.pathname !== "/api" &&
-      !url.pathname.startsWith("/api/") &&
-      url.pathname !== "/ws"
-    ) {
+    if (url.pathname !== "/api" && !url.pathname.startsWith("/api/") && url.pathname !== "/ws") {
       return env.ASSETS.fetch(request);
     }
 
     const objectId = env.CHAT_ROOM.idFromName("chat-dorhami-global");
     const room = env.CHAT_ROOM.get(objectId);
-
     const target = new URL(request.url);
-    if (target.pathname === "/api" || target.pathname.startsWith("/api/")) {
-      target.pathname = target.pathname.replace(/^\/api/, "") || "/";
-    }
-
+    if (target.pathname === "/api" || target.pathname.startsWith("/api/")) target.pathname = target.pathname.replace(/^\/api/, "") || "/";
     return room.fetch(new Request(target, request));
   }
 };
