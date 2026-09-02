@@ -27,7 +27,9 @@ export class ChatRoom extends DurableObject {
   select(){return "SELECT m.id,m.sender_id,m.receiver_id,m.room_id,m.body,m.message_type,m.media,m.created_at,m.read_at,u.username,u.avatar FROM messages m LEFT JOIN users u ON u.id=m.sender_id"}
   send(ws,d){try{ws.send(JSON.stringify(d))}catch{}}
   sockets(){return this.ctx.getWebSockets()}
-  privateBroadcast(k,d){const text=JSON.stringify(d);for(const ws of this.sockets()){const a=ws.deserializeAttachment()||{};if(a.privateKey===k)try{ws.send(text)}catch{}}}
+  privateSockets(k){return this.sockets().filter(ws=>{const a=ws.deserializeAttachment()||{};return a.privateKey===k})}
+  privateBroadcast(k,d){const text=JSON.stringify(d);for(const ws of this.privateSockets(k))try{ws.send(text)}catch{}}
+  privateSendToUser(k,userId,d){const text=JSON.stringify(d);for(const ws of this.privateSockets(k)){const a=ws.deserializeAttachment()||{};if(a.userId===userId)try{ws.send(text)}catch{}}}
   roomBroadcast(r,d){const text=JSON.stringify(d);for(const ws of this.sockets()){const a=ws.deserializeAttachment()||{};if(a.roomId===r)try{ws.send(text)}catch{}}}
 
   async fetch(req){
@@ -74,7 +76,7 @@ export class ChatRoom extends DurableObject {
         const messages=priv?this.ctx.storage.sql.exec(`${this.select()} WHERE m.room_id IS NULL AND ((m.sender_id=? AND m.receiver_id=?) OR (m.sender_id=? AND m.receiver_id=?)) ORDER BY m.created_at DESC LIMIT 100`,id,other,other,id).toArray().reverse():this.ctx.storage.sql.exec(`${this.select()} WHERE m.room_id=? ORDER BY m.created_at DESC LIMIT 100`,rid).toArray().reverse();
         this.send(ws,{type:'history',messages});return new Response(null,{status:101,webSocket:pair[0]});
       }
-      return out({ok:true,service:'chat-dorhami',version:'6-auth-stable'});
+      return out({ok:true,service:'chat-dorhami',version:'6.1-receipts'});
     }catch(e){return out({ok:false,error:'خطای داخلی سرور',detail:String(e?.message||e)},500)}
   }
 
@@ -82,7 +84,13 @@ export class ChatRoom extends DurableObject {
     let d;try{d=JSON.parse(typeof raw==='string'?raw:new TextDecoder().decode(raw))}catch{return this.send(ws,{type:'error',message:'پیام نامعتبر است.'})}
     const a=ws.deserializeAttachment()||{},id=a.userId;if(!this.user(id))return;
     if(d.type==='mark_read'){const m=this.ctx.storage.sql.exec("SELECT id,sender_id,receiver_id,read_at FROM messages WHERE id=?",s(d.messageId,100)).toArray()[0];if(m&&m.receiver_id===id&&!m.read_at){const t=Date.now();this.ctx.storage.sql.exec("UPDATE messages SET read_at=? WHERE id=?",t,m.id);this.privateBroadcast(this.key(id,m.sender_id),{type:'message_read',messageId:m.id,read_at:t})}return}
-    if(d.type==='private_message'){const to=s(d.receiverId,100),body=s(d.body);if(!this.user(to)||to===id||!body)return;const m={id:uid(),sender_id:id,receiver_id:to,room_id:null,body,message_type:'text',media:null,created_at:Date.now(),read_at:null,username:a.username,avatar:a.avatar};this.ctx.storage.sql.exec("INSERT INTO messages(id,sender_id,receiver_id,room_id,body,message_type,media,created_at,read_at) VALUES(?,?,?,?,?,?,?,?,?)",m.id,id,to,null,body,'text',null,m.created_at,null);const k=this.key(id,to);this.privateBroadcast(k,{type:'private_message',message:m});this.privateBroadcast(k,{type:'message_delivered',messageId:m.id});return}
+    if(d.type==='private_message'){const to=s(d.receiverId,100),body=s(d.body);if(!this.user(to)||to===id||!body)return;const m={id:uid(),sender_id:id,receiver_id:to,room_id:null,body,message_type:'text',media:null,created_at:Date.now(),read_at:null,username:a.username,avatar:a.avatar};this.ctx.storage.sql.exec("INSERT INTO messages(id,sender_id,receiver_id,room_id,body,message_type,media,created_at,read_at) VALUES(?,?,?,?,?,?,?,?,?)",m.id,id,to,null,body,'text',null,m.created_at,null);const k=this.key(id,to);
+      this.privateSendToUser(k,id,{type:'private_message',message:m});
+      this.privateSendToUser(k,to,{type:'private_message',message:m});
+      const recipientOnline=this.privateSockets(k).some(x=>(x.deserializeAttachment()||{}).userId===to);
+      if(recipientOnline)this.privateSendToUser(k,id,{type:'message_delivered',messageId:m.id});
+      return;
+    }
     if(d.type==='room_message'){const r=a.roomId,body=s(d.body);if(!r||!this.member(r,id)||!body)return;const m={id:uid(),sender_id:id,receiver_id:null,room_id:r,body,message_type:'text',media:null,created_at:Date.now(),read_at:null,username:a.username,avatar:a.avatar};this.ctx.storage.sql.exec("INSERT INTO messages(id,sender_id,receiver_id,room_id,body,message_type,media,created_at,read_at) VALUES(?,?,?,?,?,?,?,?,?)",m.id,id,null,r,body,'text',null,m.created_at,null);this.roomBroadcast(r,{type:'room_message',message:m})}
   }
   async webSocketClose(){}
