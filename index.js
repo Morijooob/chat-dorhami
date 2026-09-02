@@ -1,8 +1,13 @@
-import { ChatRoom } from "./Publicsrc/index.js";
+import { ChatRoom } from "./Publicsrc/backend-v5.js";
 export { ChatRoom };
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === "/" || url.pathname === "/index.html") {
+      const target = new URL(request.url);
+      target.pathname = "/app-v4.html";
+      return env.ASSETS.fetch(new Request(target, request));
+    }
     if (url.pathname !== "/api" && !url.pathname.startsWith("/api/") && url.pathname !== "/ws") {
       return env.ASSETS.fetch(request);
     }
