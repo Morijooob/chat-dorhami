@@ -1062,20 +1062,16 @@
 
   /*
    * بسیار مهم:
-   * صبر می‌کنیم HTML کاملاً لود شود.
-   */
-
-  if (
-    document.readyState ===
-    "loading"
+   * صبر می‌کنیم HTML کاملاً لود شود 
+     if (
+    document.readyState === "loading"
   ) {
     document.addEventListener(
       "DOMContentLoaded",
-      startApp,
+      init,
       { once: true }
     );
   } else {
-    startApp();
+    init();
   }
-
-        }
+})();
