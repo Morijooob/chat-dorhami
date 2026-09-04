@@ -16,6 +16,9 @@ let presenceTimer = null;
 let unreadTimer = null;
 let currentPrivateUser = '';
 let unreadByUser = {};
+let myAvatar = '👤';
+
+const AVATARS = ['😀','😎','🥰','🤩','😇','🥳','🤓','😈','👻','🤖','🐱','🐼','🦊','🐸','🐯','🦁','🐵','🐨','🐰','🐙','🦄','🐲','🌙','⭐','🔥'];
 
 function setMode(next) {
   mode = next;
@@ -39,7 +42,27 @@ async function api(path, options = {}) {
 
 function avatarFor(name) {
   const clean = String(name || '').trim();
-  return clean ? clean.charAt(0).toUpperCase() : '👤';
+  if (!clean) return '👤';
+  return window.dorhamiAvatars?.[clean] || '👤';
+}
+
+async function loadProfile(name) {
+  const clean = String(name || '').trim();
+  if (!clean) return '👤';
+  try {
+    const data = await api(`/profile?username=${encodeURIComponent(clean)}`, { method: 'GET', headers: {} });
+    window.dorhamiAvatars = window.dorhamiAvatars || {};
+    window.dorhamiAvatars[clean] = data.profile?.avatar || '👤';
+    return window.dorhamiAvatars[clean];
+  } catch (error) {
+    return avatarFor(clean);
+  }
+}
+
+async function loadMyProfile() {
+  myAvatar = await loadProfile(username);
+  $('#myAvatar').textContent = myAvatar;
+  $('#myProfileName').textContent = username;
 }
 
 function escapeHtml(value) {
@@ -61,10 +84,58 @@ function closeProfile() {
   if (profile) profile.classList.add('hidden');
 }
 
+function openAvatarPicker() {
+  if (!username) return;
+  const picker = $('#avatarPicker');
+  const grid = $('#avatarGrid');
+  if (!picker || !grid) return;
+  grid.innerHTML = AVATARS.map(avatar => `<button class="avatar-option${avatar === myAvatar ? ' selected' : ''}" type="button" data-avatar="${avatar}">${avatar}</button>`).join('');
+  picker.classList.remove('hidden');
+  grid.querySelectorAll('.avatar-option').forEach(button => {
+    button.addEventListener('click', () => saveAvatar(button.dataset.avatar));
+  });
+}
+
+function closeAvatarPicker() {
+  $('#avatarPicker')?.classList.add('hidden');
+}
+
+async function saveAvatar(avatar) {
+  if (!AVATARS.includes(avatar) || !username) return;
+  const previous = myAvatar;
+  try {
+    const data = await api('/profile', {
+      method: 'POST',
+      body: JSON.stringify({ username, avatar })
+    });
+    myAvatar = data.profile?.avatar || avatar;
+    window.dorhamiAvatars = window.dorhamiAvatars || {};
+    window.dorhamiAvatars[username] = myAvatar;
+    $('#myAvatar').textContent = myAvatar;
+    $('#profileAvatar').textContent = myAvatar;
+    closeAvatarPicker();
+    await loadUsers();
+    await loadMessages();
+  } catch (error) {
+    myAvatar = previous;
+    alert(error.message);
+  }
+}
+
 function setupProfileEvents() {
-  $('#myProfile')?.addEventListener('click', () => openProfile(username));
+  $('#myProfile')?.addEventListener('click', async () => {
+    await loadMyProfile();
+    openProfile(username);
+  });
+  $('#profileAvatar')?.addEventListener('click', () => {
+    if (String($('#profileUsername')?.textContent || '') === username) openAvatarPicker();
+  });
   $('#profileClose')?.addEventListener('click', closeProfile);
-  document.addEventListener('click', (event) => {
+  $('#avatarPickerClose')?.addEventListener('click', closeAvatarPicker);
+  $('#avatarPicker')?.addEventListener('click', event => {
+    if (event.target.id === 'avatarPicker') closeAvatarPicker();
+  });
+  document.addEventListener('click', event => {
     const profile = $('#profilePopover');
     if (!profile || profile.classList.contains('hidden')) return;
     if (!profile.contains(event.target) && !$('#myProfile')?.contains(event.target)) closeProfile();
@@ -132,13 +203,14 @@ function stopUnreadPolling() {
   updateUnreadBadge();
 }
 
-function showChat() {
+async function showChat() {
   authView.classList.add('hidden');
   chatView.classList.remove('hidden');
   $('#onlineText').textContent = `در حال اتصال · ${username}`;
-  $('#myAvatar').textContent = avatarFor(username);
+  $('#myAvatar').textContent = '👤';
   $('#myProfileName').textContent = username;
   currentPrivateUser = '';
+  await loadMyProfile();
   showPublicChat();
   startPresence();
   startUnreadPolling();
@@ -152,6 +224,7 @@ function showAuth() {
   stopPresence();
   stopUnreadPolling();
   closeProfile();
+  closeAvatarPicker();
   chatView.classList.add('hidden');
   authView.classList.remove('hidden');
 }
@@ -176,7 +249,11 @@ function renderMessages(list) {
     return `<article class="message${mine}" data-username="${escapeHtml(m.username)}"><button class="message-user" type="button"><span class="message-avatar avatar">${escapeHtml(avatarFor(m.username))}</span><span class="meta">${escapeHtml(m.username)} · ${time}</span></button><div class="body">${escapeHtml(m.text)}</div></article>`;
   }).join('');
   messagesEl.querySelectorAll('.message-user').forEach(button => {
-    button.addEventListener('click', () => openProfile(button.closest('.message')?.dataset.username || ''));
+    button.addEventListener('click', async () => {
+      const name = button.closest('.message')?.dataset.username || '';
+      await loadProfile(name);
+      openProfile(name);
+    });
   });
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
@@ -191,13 +268,24 @@ function renderPrivateMessages(list) {
     const time = new Date(m.created_at).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
     return `<article class="message${mine}" data-username="${escapeHtml(m.sender)}"><button class="message-user" type="button"><span class="message-avatar avatar">${escapeHtml(avatarFor(m.sender))}</span><span class="meta">${escapeHtml(m.sender)} · ${time}</span></button><div class="body">${escapeHtml(m.text)}</div></article>`;
   }).join('');
+  messagesEl.querySelectorAll('.message-user').forEach(button => {
+    button.addEventListener('click', async () => {
+      const name = button.closest('.message')?.dataset.username || '';
+      await loadProfile(name);
+      openProfile(name);
+    });
+  });
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
 async function loadMessages() {
   try {
     const data = await api('/messages', { method: 'GET', headers: {} });
-    if (!currentPrivateUser) renderMessages(data.messages || []);
+    if (!currentPrivateUser) {
+      const names = [...new Set((data.messages || []).map(m => m.username))];
+      await Promise.all(names.map(loadProfile));
+      renderMessages(data.messages || []);
+    }
   } catch (error) {
     $('#onlineText').textContent = 'اتصال دوباره در حال تلاش است…';
   }
@@ -209,6 +297,8 @@ async function loadPrivateMessages() {
     const data = await api(`/private-messages?me=${encodeURIComponent(username)}&with=${encodeURIComponent(currentPrivateUser)}`, { method: 'GET', headers: {} });
     if (currentPrivateUser) {
       const messages = data.messages || [];
+      const names = [...new Set(messages.map(m => m.sender))];
+      await Promise.all(names.map(loadProfile));
       renderPrivateMessages(messages);
       const last = messages[messages.length - 1];
       if (last) await markPrivateRead(currentPrivateUser, last.id);
@@ -244,6 +334,7 @@ async function openPrivateChat(otherUser) {
   $('#roomName').textContent = `گفتگوی خصوصی با ${clean}`;
   $('#onlineText').textContent = 'گفتگوی خصوصی';
   messageInput.placeholder = `پیام برای ${clean}...`;
+  await loadProfile(clean);
   await loadPrivateMessages();
   messageInput.focus();
 }
@@ -267,9 +358,12 @@ function renderUserListSearch() {
 
 async function loadUsers() {
   const list = $('#userList');
+  if (!list) return;
   list.innerHTML = '<div class="user-loading">در حال دریافت کاربران…</div>';
   try {
     const data = await api('/users', { method: 'GET', headers: {} });
+    window.dorhamiAvatars = window.dorhamiAvatars || {};
+    (data.users || []).forEach(user => { window.dorhamiAvatars[user.username] = user.avatar || '👤'; });
     window.dorhamiUsers = (data.users || []).map(u => u.username).filter(name => name !== username);
     if (!window.dorhamiUsers.length) {
       list.innerHTML = '<div class="user-loading">کاربر دیگری برای گفتگوی خصوصی نیست.</div>';
@@ -303,8 +397,10 @@ authForm.addEventListener('submit', async (event) => {
     });
     username = data.username || usernameValue;
     localStorage.setItem('dorhami_user', username);
+    window.dorhamiAvatars = window.dorhamiAvatars || {};
+    window.dorhamiAvatars[username] = data.avatar || '👤';
     passwordInput.value = '';
-    showChat();
+    await showChat();
   } catch (error) {
     authStatus.textContent = error.message;
   }
@@ -347,6 +443,7 @@ $('#logout').addEventListener('click', async () => {
   } catch (error) {}
   localStorage.removeItem('dorhami_user');
   username = '';
+  myAvatar = '👤';
   showAuth();
 });
 
