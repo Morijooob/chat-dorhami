@@ -124,7 +124,9 @@ export default {
         return env.CHAT_ROOM.get(id).fetch(request);
       }
 
-      return env.ASSETS.fetch(request);
+      // Pass a fresh Request to the Assets binding so the asset URL and request
+      // metadata are resolved explicitly by the Workers Assets runtime.
+      return env.ASSETS.fetch(new Request(url.toString(), request));
     } catch (error) {
       console.error("Worker error", error);
       return json({
