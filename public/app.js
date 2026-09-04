@@ -18,7 +18,7 @@ function handle(d){
   if(d.type==='message'){if(!privateUser)addMessage(d.message);return;}
   if(d.type==='presence'){onlineIds=new Set((d.users||[]).map(u=>Number(u.id)));$('online').textContent=fa(d.count)+' آنلاین';$('users').innerHTML=(d.users||[]).map(u=>`<div class="user ${u.id===me?.id?'self':''}" data-user-id="${Number(u.id)}"><span>🟢</span><b>${esc(u.username)}</b>${u.id===me?.id?'<small> شما</small>':'<em>چت خصوصی</em>'}</div>`).join('');document.querySelectorAll('.user[data-user-id]').forEach(el=>{if(Number(el.dataset.userId)!==Number(me?.id))el.onclick=()=>openPrivate(Number(el.dataset.userId));});renderPrivateChats();if(privateUser)$('chatSubtitle').textContent=onlineIds.has(Number(privateUser.id))?'🟢 آنلاین':'⚪ آفلاین';return;}
   if(d.type==='typing'){if(privateUser&&Number(d.user?.id)===Number(privateUser.id)){clearTimeout(remoteTypingTimer);$('typing').textContent=d.typing?'✍️ در حال نوشتن...':'';if(d.typing)remoteTypingTimer=setTimeout(()=>{$('typing').textContent='';},2500);}return;}
-  if(d.type==='private_opened'){clearRemoteTyping();privateUser=d.user;rememberChat(d.user,{created_at:d.messages?.length?d.messages[d.messages.length-1].created_at:Date.now(),body:d.messages?.length?d.messages[d.messages.length-1].body:''});setPrivateHeader();renderHistory(d.messages||[]);return;}
+  if(d.type==='private_opened'){clearRemoteTyping();privateUser=d.user;markChatRead(d.user?.id);rememberChat(d.user,{created_at:d.messages?.length?d.messages[d.messages.length-1].created_at:Date.now(),body:d.messages?.length?d.messages[d.messages.length-1].body:''});setPrivateHeader();renderHistory(d.messages||[]);return;}
   if(d.type==='private_history'){if(privateUser&&Number(d.user?.id)===Number(privateUser.id))renderHistory(d.messages||[]);return;}
   if(d.type==='private_message'){
     const fromId=Number(d.from?.id),toId=Number(d.to?.id),myId=Number(me?.id),privateId=Number(privateUser?.id),messageUserId=Number(d.message?.user_id);
@@ -26,7 +26,7 @@ function handle(d){
     const otherUser=fromId===myId?d.to:d.from;
     rememberChat(otherUser,d.message);
     const belongsToCurrentPrivateChat=privateUser&&(fromId===privateId||toId===privateId||messageUserId===myId);
-    if(belongsToCurrentPrivateChat){clearRemoteTyping();addMessage(d.message);}else if(!privateUser)toast(`پیام خصوصی جدید از ${d.from?.username||'کاربر'}`);
+    if(belongsToCurrentPrivateChat){clearRemoteTyping();addMessage(d.message);if(fromId!==myId)markChatRead(otherUser?.id);}else if(fromId!==myId){incrementUnread(otherUser);toast(`پیام خصوصی جدید از ${d.from?.username||'کاربر'}`);}
     return;
   }
   if(d.type==='private_error'){toast(d.error||'باز کردن چت خصوصی انجام نشد.');return;}
@@ -40,10 +40,15 @@ function renderHistory(messages){const box=$('messages');box.innerHTML='';messag
 function addMessage(m){if(!m)return;const box=$('messages'),mine=me&&m.user_id?Number(m.user_id)===Number(me.id):me&&m.username===me.username,el=document.createElement('div');el.className='bubble '+(mine?'mine':'');el.innerHTML=`<div class="name">${esc(m.username)}</div><div>${esc(m.body)}</div><time>${formatTime(m.created_at)}</time>`;box.appendChild(el);box.scrollTop=box.scrollHeight;}
 function formatTime(value){const date=new Date(Number(value));if(Number.isNaN(date.getTime()))return '';return date.toLocaleTimeString('fa-IR',{hour:'2-digit',minute:'2-digit'});}
 function chatStorageKey(){return me?`dorhami_private_chats_${me.id}`:'';}
+function unreadStorageKey(){return me?`dorhami_private_unread_${me.id}`:'';}
 function loadPrivateChats(){if(!me)return[];try{const data=JSON.parse(localStorage.getItem(chatStorageKey())||'[]');return Array.isArray(data)?data.filter(x=>x&&Number(x.id)>0&&Number(x.id)!==Number(me.id)):[]}catch{return[];}}
 function savePrivateChats(list){try{localStorage.setItem(chatStorageKey(),JSON.stringify(list.slice(0,50)))}catch{}}
+function loadUnread(){if(!me)return{};try{const data=JSON.parse(localStorage.getItem(unreadStorageKey())||'{}');return data&&typeof data==='object'?data:{}}catch{return{};}}
+function saveUnread(data){try{localStorage.setItem(unreadStorageKey(),JSON.stringify(data))}catch{}}
+function markChatRead(userId){const id=Number(userId);if(!id||!me)return;const data=loadUnread();if(data[id]){delete data[id];saveUnread(data);renderPrivateChats();}}
+function incrementUnread(user){if(!user||!me||Number(user.id)===Number(me.id))return;const id=Number(user.id),data=loadUnread();data[id]=(Number(data[id])||0)+1;saveUnread(data);renderPrivateChats();}
 function rememberChat(user,message){if(!user||!me||Number(user.id)===Number(me.id))return;const list=loadPrivateChats(),id=Number(user.id),item={id,username:String(user.username||'کاربر'),body:String(message?.body||''),created_at:Number(message?.created_at)||Date.now()};const next=[item,...list.filter(x=>Number(x.id)!==id)];savePrivateChats(next);renderPrivateChats();}
-function renderPrivateChats(){const box=$('privateChats');if(!box||!me)return;const list=loadPrivateChats();if(!list.length){box.innerHTML='<div class="private-empty">هنوز گفتگوی خصوصی نداری</div>';return;}box.innerHTML=list.map(c=>{const isOnline=onlineIds.has(Number(c.id));return `<div class="private-chat" data-private-id="${c.id}"><div class="avatar">${isOnline?'🟢':'⚪'}</div><div class="chat-info"><b>@${esc(c.username)}</b><small>${esc(c.body||'گفتگوی خصوصی')}</small></div><time>${isOnline?'آنلاین':'آفلاین'} · ${formatTime(c.created_at)}</time></div>`;}).join('');box.querySelectorAll('.private-chat').forEach(el=>el.onclick=()=>openPrivate(Number(el.dataset.privateId)));}
+function renderPrivateChats(){const box=$('privateChats');if(!box||!me)return;const list=loadPrivateChats(),unread=loadUnread();if(!list.length){box.innerHTML='<div class="private-empty">هنوز گفتگوی خصوصی نداری</div>';return;}box.innerHTML=list.map(c=>{const isOnline=onlineIds.has(Number(c.id)),count=Number(unread[c.id])||0;return `<div class="private-chat" data-private-id="${c.id}"><div class="avatar">${isOnline?'🟢':'⚪'}</div><div class="chat-info"><b>@${esc(c.username)}</b><small>${esc(c.body||'گفتگوی خصوصی')}</small></div>${count?`<span class="unread-badge">${count>99?'۹۹+':fa(count)}</span>`:''}<time>${isOnline?'آنلاین':'آفلاین'} · ${formatTime(c.created_at)}</time></div>`;}).join('');box.querySelectorAll('.private-chat').forEach(el=>el.onclick=()=>openPrivate(Number(el.dataset.privateId)));}
 function stopTyping(){clearTimeout(typingTimer);if(socket&&socket.readyState===WebSocket.OPEN&&privateUser)socket.send(JSON.stringify({type:'typing',targetId:Number(privateUser.id),typing:false}));}
 function sendTyping(){if(!privateUser||!socket||socket.readyState!==WebSocket.OPEN)return;clearTimeout(typingTimer);socket.send(JSON.stringify({type:'typing',targetId:Number(privateUser.id),typing:true}));typingTimer=setTimeout(stopTyping,1200);}
 $('message').addEventListener('input',()=>{if(privateUser){if($('message').value.trim())sendTyping();else stopTyping();}});
