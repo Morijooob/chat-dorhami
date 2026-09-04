@@ -19,39 +19,49 @@ export class Dorhami extends DurableObject {
     super(state, env);
     this.state = state;
     this.clients = new Map();
+    this.initError = null;
+
+    // Cloudflare recommends blockConcurrencyWhile() for one-time Durable Object
+    // initialization. Keep the exception inside the callback so a bad schema or
+    // storage configuration does not silently kill the object.
     state.blockConcurrencyWhile(async () => {
-      state.storage.sql.exec(`
-        CREATE TABLE IF NOT EXISTS users (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-          password_hash TEXT NOT NULL,
-          salt TEXT NOT NULL,
-          role TEXT NOT NULL DEFAULT 'user',
-          created_at INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS sessions (
-          token_hash TEXT PRIMARY KEY,
-          user_id INTEGER NOT NULL,
-          expires_at INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id);
-        CREATE TABLE IF NOT EXISTS messages (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          room TEXT NOT NULL,
-          user_id INTEGER NOT NULL,
-          username TEXT NOT NULL,
-          body TEXT NOT NULL,
-          created_at INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS messages_room_id ON messages(room, id);
-      `);
+      try {
+        state.storage.sql.exec(`
+          CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            password_hash TEXT NOT NULL,
+            salt TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'user',
+            created_at INTEGER NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS sessions (
+            token_hash TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id);
+          CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            username TEXT NOT NULL,
+            body TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS messages_room_id ON messages(room, id);
+        `);
+      } catch (error) {
+        this.initError = safeError(error);
+        console.error('DORHAMI_INIT_FAILED', error);
+      }
     });
   }
 
   async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === '/ws') return this.websocket(request);
-    if (url.pathname === '/api/health') return json({ ok: true, service: 'dorhami-mon' });
+    if (url.pathname === '/api/health') return this.health();
     if (url.pathname === '/api/register' && request.method === 'POST') return this.register(request);
     if (url.pathname === '/api/login' && request.method === 'POST') return this.login(request);
     if (url.pathname === '/api/logout' && request.method === 'POST') return this.logout(request);
@@ -60,34 +70,65 @@ export class Dorhami extends DurableObject {
     return json({ error: 'Not found' }, 404);
   }
 
+  storageReady() {
+    if (this.initError) return false;
+    return !!this.state?.storage?.sql;
+  }
+
+  health() {
+    try {
+      if (!this.storageReady()) {
+        return json({ ok: false, service: 'dorhami-mon', code: 'STORAGE_INIT_FAILED', detail: this.initError || 'SQL storage is unavailable' }, 500);
+      }
+      const row = this.state.storage.sql.exec('SELECT 1 AS ok').one();
+      return json({ ok: row?.ok === 1, service: 'dorhami-mon', storage: 'sqlite' });
+    } catch (error) {
+      console.error('DORHAMI_HEALTH_FAILED', error);
+      return json({ ok: false, service: 'dorhami-mon', code: 'SQL_HEALTH_FAILED', detail: safeError(error) }, 500);
+    }
+  }
+
   async register(request) {
-    const body = await readJson(request);
-    const username = cleanName(body.username);
-    const password = String(body.password || '');
-    if (!/^[\p{L}\p{N}_-]{3,24}$/u.test(username)) return json({ error: 'نام کاربری باید ۳ تا ۲۴ کاراکتر باشد.' }, 400);
-    if (password.length < 6 || password.length > 128) return json({ error: 'رمز عبور باید حداقل ۶ کاراکتر باشد.' }, 400);
-    const exists = this.state.storage.sql.exec('SELECT id FROM users WHERE username = ?', username).one();
-    if (exists) return json({ error: 'این نام کاربری قبلاً ثبت شده است.' }, 409);
-    const salt = bytes(16);
-    const hash = await derive(password, salt);
-    const now = Date.now();
-    this.state.storage.sql.exec('INSERT INTO users(username,password_hash,salt,created_at) VALUES(?,?,?,?)', username, hash, b64(salt), now);
-    const user = this.state.storage.sql.exec('SELECT id,username,role FROM users WHERE username=?', username).one();
-    const token = await this.createSession(user.id);
-    return withCookie(json({ ok: true, user }), token);
+    try {
+      if (!this.storageReady()) return json({ error: 'پایگاه داده آماده نیست.', code: 'STORAGE_INIT_FAILED' }, 503);
+      const body = await readJson(request);
+      const username = cleanName(body.username);
+      const password = String(body.password || '');
+      if (!/^[\p{L}\p{N}_-]{3,24}$/u.test(username)) return json({ error: 'نام کاربری باید ۳ تا ۲۴ کاراکتر باشد.' }, 400);
+      if (password.length < 6 || password.length > 128) return json({ error: 'رمز عبور باید حداقل ۶ کاراکتر باشد.' }, 400);
+      const exists = this.state.storage.sql.exec('SELECT id FROM users WHERE username = ?', username).one();
+      if (exists) return json({ error: 'این نام کاربری قبلاً ثبت شده است.' }, 409);
+      const salt = bytes(16);
+      const hash = await derive(password, salt);
+      const now = Date.now();
+      this.state.storage.sql.exec('INSERT INTO users(username,password_hash,salt,created_at) VALUES(?,?,?,?)', username, hash, b64(salt), now);
+      const user = this.state.storage.sql.exec('SELECT id,username,role FROM users WHERE username=?', username).one();
+      if (!user) throw new Error('USER_INSERT_FAILED');
+      const token = await this.createSession(user.id);
+      return withCookie(json({ ok: true, user }), token);
+    } catch (error) {
+      console.error('DORHAMI_REGISTER_FAILED', error);
+      return json({ error: 'ثبت‌نام انجام نشد.', code: 'REGISTER_FAILED', detail: safeError(error) }, 500);
+    }
   }
 
   async login(request) {
-    const body = await readJson(request);
-    const username = cleanName(body.username);
-    const password = String(body.password || '');
-    if (!username || !password) return json({ error: 'نام کاربری و رمز عبور را وارد کن.' }, 400);
-    const user = this.state.storage.sql.exec('SELECT id,username,role,password_hash,salt FROM users WHERE username=?', username).one();
-    if (!user) return json({ error: 'نام کاربری یا رمز عبور اشتباه است.' }, 401);
-    const candidate = await derive(password, fromB64(user.salt));
-    if (!safeEqual(user.password_hash, candidate)) return json({ error: 'نام کاربری یا رمز عبور اشتباه است.' }, 401);
-    const token = await this.createSession(user.id);
-    return withCookie(json({ ok: true, user: { id: user.id, username: user.username, role: user.role } }), token);
+    try {
+      if (!this.storageReady()) return json({ error: 'پایگاه داده آماده نیست.', code: 'STORAGE_INIT_FAILED' }, 503);
+      const body = await readJson(request);
+      const username = cleanName(body.username);
+      const password = String(body.password || '');
+      if (!username || !password) return json({ error: 'نام کاربری و رمز عبور را وارد کن.' }, 400);
+      const user = this.state.storage.sql.exec('SELECT id,username,role,password_hash,salt FROM users WHERE username=?', username).one();
+      if (!user) return json({ error: 'نام کاربری یا رمز عبور اشتباه است.' }, 401);
+      const candidate = await derive(password, fromB64(user.salt));
+      if (!safeEqual(user.password_hash, candidate)) return json({ error: 'نام کاربری یا رمز عبور اشتباه است.' }, 401);
+      const token = await this.createSession(user.id);
+      return withCookie(json({ ok: true, user: { id: user.id, username: user.username, role: user.role } }), token);
+    } catch (error) {
+      console.error('DORHAMI_LOGIN_FAILED', error);
+      return json({ error: 'ورود انجام نشد.', code: 'LOGIN_FAILED', detail: safeError(error) }, 500);
+    }
   }
 
   async createSession(userId) {
@@ -98,6 +139,7 @@ export class Dorhami extends DurableObject {
   }
 
   async auth(request) {
+    if (!this.storageReady()) return null;
     const token = cookie(request, COOKIE);
     if (!token) return null;
     const tokenHash = await sha256(token);
@@ -109,25 +151,41 @@ export class Dorhami extends DurableObject {
   }
 
   async logout(request) {
-    const token = cookie(request, COOKIE);
-    if (token) this.state.storage.sql.exec('DELETE FROM sessions WHERE token_hash=?', await sha256(token));
-    return new Response(JSON.stringify({ ok: true }), {
-      headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Set-Cookie': clearCookie() }
-    });
+    try {
+      const token = cookie(request, COOKIE);
+      if (token && this.storageReady()) this.state.storage.sql.exec('DELETE FROM sessions WHERE token_hash=?', await sha256(token));
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Set-Cookie': clearCookie() }
+      });
+    } catch (error) {
+      console.error('DORHAMI_LOGOUT_FAILED', error);
+      return json({ error: 'خروج انجام نشد.', code: 'LOGOUT_FAILED' }, 500);
+    }
   }
 
   async me(request) {
-    const user = await this.auth(request);
-    return json({ authenticated: !!user, user: user || null });
+    try {
+      const user = await this.auth(request);
+      return json({ authenticated: !!user, user: user || null });
+    } catch (error) {
+      console.error('DORHAMI_ME_FAILED', error);
+      return json({ error: 'خطا در بررسی حساب.', code: 'ME_FAILED' }, 500);
+    }
   }
 
   async rooms(request) {
-    const user = await this.auth(request);
-    if (!user) return json({ error: 'وارد حساب شو.' }, 401);
-    const messages = this.state.storage.sql.exec(
-      'SELECT id,username,body,created_at FROM messages WHERE room=? ORDER BY id DESC LIMIT 80', ROOM
-    ).toArray().reverse();
-    return json({ rooms: [{ id: ROOM, name: 'عمومی', icon: '💬', online: this.clients.size }], messages });
+    try {
+      const user = await this.auth(request);
+      if (!user) return json({ error: 'وارد حساب شو.' }, 401);
+      if (!this.storageReady()) return json({ error: 'پایگاه داده آماده نیست.', code: 'STORAGE_INIT_FAILED' }, 503);
+      const messages = this.state.storage.sql.exec(
+        'SELECT id,username,body,created_at FROM messages WHERE room=? ORDER BY id DESC LIMIT 80', ROOM
+      ).toArray().reverse();
+      return json({ rooms: [{ id: ROOM, name: 'عمومی', icon: '💬', online: this.clients.size }], messages });
+    } catch (error) {
+      console.error('DORHAMI_ROOMS_FAILED', error);
+      return json({ error: 'اتاق گفتگو آماده نشد.', code: 'ROOMS_FAILED' }, 500);
+    }
   }
 
   async websocket(request) {
@@ -149,7 +207,9 @@ export class Dorhami extends DurableObject {
         if (msg.type === 'history') return this.sendHistory(server);
         if (msg.type === 'ping') return server.send(JSON.stringify({ type: 'pong' }));
         if (msg.type === 'message') await this.broadcastMessage(user, msg.body);
-      } catch {}
+      } catch (error) {
+        console.error('DORHAMI_WS_MESSAGE_FAILED', error);
+      }
     });
     server.addEventListener('close', remove);
     server.addEventListener('error', remove);
@@ -199,6 +259,10 @@ export class Dorhami extends DurableObject {
 export class ChatRoom extends Dorhami {}
 
 function cleanName(v) { return String(v || '').trim().normalize('NFKC'); }
+function safeError(error) {
+  if (!error) return 'unknown error';
+  return String(error?.message || error).slice(0, 500);
+}
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
