@@ -36,7 +36,12 @@ export class ChatRoom extends DurableObject {
         text TEXT NOT NULL,
         created_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS presence (
+        username TEXT PRIMARY KEY,
+        last_seen INTEGER NOT NULL
+      );
       CREATE INDEX IF NOT EXISTS messages_created_at ON messages(created_at);
+      CREATE INDEX IF NOT EXISTS presence_last_seen ON presence(last_seen);
     `);
   }
 
@@ -71,6 +76,30 @@ export class ChatRoom extends DurableObject {
         return json({ ok: true, username: rows[0].username });
       }
 
+      if (url.pathname === "/presence" && request.method === "POST") {
+        const body = await request.json();
+        const username = String(body.username || "").trim();
+        if (!username || username.length > 24) return json({ error: "کاربر نامعتبر است." }, 400);
+        const now = Date.now();
+        this.ctx.storage.sql.exec("INSERT INTO presence (username, last_seen) VALUES (?, ?) ON CONFLICT(username) DO UPDATE SET last_seen = excluded.last_seen", username, now);
+        this.ctx.storage.sql.exec("DELETE FROM presence WHERE last_seen < ?", now - 30000);
+        return json({ ok: true });
+      }
+
+      if (url.pathname === "/presence" && request.method === "GET") {
+        const now = Date.now();
+        this.ctx.storage.sql.exec("DELETE FROM presence WHERE last_seen < ?", now - 30000);
+        const rows = this.ctx.storage.sql.exec("SELECT username, last_seen FROM presence ORDER BY username COLLATE NOCASE").toArray();
+        return json({ ok: true, count: rows.length, users: rows });
+      }
+
+      if (url.pathname === "/presence" && request.method === "DELETE") {
+        const body = await request.json().catch(() => ({}));
+        const username = String(body.username || "").trim();
+        if (username) this.ctx.storage.sql.exec("DELETE FROM presence WHERE username = ?", username);
+        return json({ ok: true });
+      }
+
       if (url.pathname === "/messages" && request.method === "GET") {
         const rows = this.ctx.storage.sql.exec("SELECT id, username, text, created_at FROM messages ORDER BY id DESC LIMIT 100").toArray().reverse();
         return json({ ok: true, messages: rows });
@@ -97,7 +126,7 @@ export class ChatRoom extends DurableObject {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const apiPaths = new Set(["/health", "/register", "/login", "/messages"]);
+    const apiPaths = new Set(["/health", "/register", "/login", "/presence", "/messages"]);
     if (apiPaths.has(url.pathname)) {
       try {
         const id = env.CHAT_ROOM.idFromName("public-room");
