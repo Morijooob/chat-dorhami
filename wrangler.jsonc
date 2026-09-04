@@ -6,6 +6,8 @@
   "durable_objects": {
     "bindings": [{ "name": "DORHAMI", "class_name": "Dorhami" }]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Dorhami"] }],
+  "migrations": [
+    { "tag": "v2", "new_sqlite_classes": ["Dorhami"] }
+  ],
   "assets": { "directory": "./public" }
 }
