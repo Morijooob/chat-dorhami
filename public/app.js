@@ -13,6 +13,7 @@ let mode = 'login';
 let username = localStorage.getItem('dorhami_user') || '';
 let timer = null;
 let presenceTimer = null;
+let currentPrivateUser = '';
 
 function setMode(next) {
   mode = next;
@@ -37,6 +38,10 @@ async function api(path, options = {}) {
 function avatarFor(name) {
   const clean = String(name || '').trim();
   return clean ? clean.charAt(0).toUpperCase() : '👤';
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>'"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[c]));
 }
 
 function openProfile(name) {
@@ -95,10 +100,11 @@ function showChat() {
   $('#onlineText').textContent = `در حال اتصال · ${username}`;
   $('#myAvatar').textContent = avatarFor(username);
   $('#myProfileName').textContent = username;
-  loadMessages();
+  currentPrivateUser = '';
+  showPublicChat();
   startPresence();
   if (timer) clearInterval(timer);
-  timer = setInterval(loadMessages, 2500);
+  timer = setInterval(loadCurrentConversation, 2500);
   messageInput.focus();
 }
 
@@ -108,6 +114,14 @@ function showAuth() {
   closeProfile();
   chatView.classList.add('hidden');
   authView.classList.remove('hidden');
+}
+
+function showPublicChat() {
+  currentPrivateUser = '';
+  $('#privateBar').classList.add('hidden');
+  $('#roomName').textContent = 'اتاق عمومی دورهمی';
+  messageInput.placeholder = 'پیامت رو بنویس...';
+  loadMessages();
 }
 
 function renderMessages(list) {
@@ -126,17 +140,79 @@ function renderMessages(list) {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-function escapeHtml(value) {
-  return String(value).replace(/[&<>'"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[c]));
+function renderPrivateMessages(list) {
+  if (!list.length) {
+    messagesEl.innerHTML = '<div class="welcome"><b>گفتگوی خصوصی 🌙</b><span>اولین پیام را بفرست!</span></div>';
+    return;
+  }
+  messagesEl.innerHTML = list.map(m => {
+    const mine = m.sender === username ? ' mine' : '';
+    const time = new Date(m.created_at).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+    return `<article class="message${mine}" data-username="${escapeHtml(m.sender)}"><button class="message-user" type="button"><span class="message-avatar avatar">${escapeHtml(avatarFor(m.sender))}</span><span class="meta">${escapeHtml(m.sender)} · ${time}</span></button><div class="body">${escapeHtml(m.text)}</div></article>`;
+  }).join('');
+  messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
 async function loadMessages() {
   try {
     const data = await api('/messages', { method: 'GET', headers: {} });
-    renderMessages(data.messages || []);
+    if (!currentPrivateUser) renderMessages(data.messages || []);
   } catch (error) {
     $('#onlineText').textContent = 'اتصال دوباره در حال تلاش است…';
   }
+}
+
+async function loadPrivateMessages() {
+  if (!currentPrivateUser) return;
+  try {
+    const data = await api(`/private-messages?me=${encodeURIComponent(username)}&with=${encodeURIComponent(currentPrivateUser)}`, { method: 'GET', headers: {} });
+    if (currentPrivateUser) renderPrivateMessages(data.messages || []);
+  } catch (error) {
+    $('#onlineText').textContent = error.message;
+  }
+}
+
+async function loadCurrentConversation() {
+  if (currentPrivateUser) await loadPrivateMessages();
+  else await loadMessages();
+}
+
+async function openPrivateChat(otherUser) {
+  const clean = String(otherUser || '').trim();
+  if (!clean || clean === username) return;
+  currentPrivateUser = clean;
+  $('#userPanel').classList.add('hidden');
+  $('#privateBar').classList.remove('hidden');
+  $('#privateWith').textContent = clean;
+  $('#roomName').textContent = `گفتگوی خصوصی با ${clean}`;
+  $('#onlineText').textContent = 'گفتگوی خصوصی';
+  messageInput.placeholder = `پیام برای ${clean}...`;
+  await loadPrivateMessages();
+  messageInput.focus();
+}
+
+async function loadUsers() {
+  const list = $('#userList');
+  list.innerHTML = '<div class="user-loading">در حال دریافت کاربران…</div>';
+  try {
+    const data = await api('/users', { method: 'GET', headers: {} });
+    const users = (data.users || []).map(u => u.username).filter(name => name !== username);
+    if (!users.length) {
+      list.innerHTML = '<div class="user-loading">کاربر دیگری برای گفتگوی خصوصی نیست.</div>';
+      return;
+    }
+    list.innerHTML = users.map(name => `<button class="user-item" type="button" data-user="${escapeHtml(name)}"><span class="avatar">${escapeHtml(avatarFor(name))}</span><span><b>${escapeHtml(name)}</b><small>شروع پیام خصوصی</small></span></button>`).join('');
+    list.querySelectorAll('.user-item').forEach(button => button.addEventListener('click', () => openPrivateChat(button.dataset.user)));
+  } catch (error) {
+    list.innerHTML = `<div class="user-loading">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function toggleUserPanel() {
+  const panel = $('#userPanel');
+  const willOpen = panel.classList.contains('hidden');
+  panel.classList.toggle('hidden');
+  if (willOpen) loadUsers();
 }
 
 authForm.addEventListener('submit', async (event) => {
@@ -163,9 +239,15 @@ messageForm.addEventListener('submit', async (event) => {
   if (!text) return;
   messageInput.disabled = true;
   try {
-    await api('/messages', { method: 'POST', body: JSON.stringify({ username, text }) });
-    messageInput.value = '';
-    await loadMessages();
+    if (currentPrivateUser) {
+      await api('/private-messages', { method: 'POST', body: JSON.stringify({ sender: username, recipient: currentPrivateUser, text }) });
+      messageInput.value = '';
+      await loadPrivateMessages();
+    } else {
+      await api('/messages', { method: 'POST', body: JSON.stringify({ username, text }) });
+      messageInput.value = '';
+      await loadMessages();
+    }
   } catch (error) {
     $('#onlineText').textContent = error.message;
   } finally {
@@ -173,6 +255,10 @@ messageForm.addEventListener('submit', async (event) => {
     messageInput.focus();
   }
 });
+
+$('#usersTrigger').addEventListener('click', toggleUserPanel);
+$('#userPanelClose').addEventListener('click', () => $('#userPanel').classList.add('hidden'));
+$('#backPublic').addEventListener('click', showPublicChat);
 
 $('#logout').addEventListener('click', async () => {
   const leavingUser = username;
