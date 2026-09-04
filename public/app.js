@@ -34,6 +34,36 @@ async function api(path, options = {}) {
   return data;
 }
 
+function avatarFor(name) {
+  const clean = String(name || '').trim();
+  return clean ? clean.charAt(0).toUpperCase() : '👤';
+}
+
+function openProfile(name) {
+  const profile = $('#profilePopover');
+  if (!profile) return;
+  const clean = String(name || '').trim();
+  $('#profileAvatar').textContent = avatarFor(clean);
+  $('#profileUsername').textContent = clean || 'کاربر';
+  $('#profileStatus').textContent = clean === username ? 'پروفایل من' : 'عضو دورهمی';
+  profile.classList.remove('hidden');
+}
+
+function closeProfile() {
+  const profile = $('#profilePopover');
+  if (profile) profile.classList.add('hidden');
+}
+
+function setupProfileEvents() {
+  $('#myProfile')?.addEventListener('click', () => openProfile(username));
+  $('#profileClose')?.addEventListener('click', closeProfile);
+  document.addEventListener('click', (event) => {
+    const profile = $('#profilePopover');
+    if (!profile || profile.classList.contains('hidden')) return;
+    if (!profile.contains(event.target) && !$('#myProfile')?.contains(event.target)) closeProfile();
+  });
+}
+
 async function updatePresence() {
   if (!username) return;
   try {
@@ -45,9 +75,7 @@ async function updatePresence() {
     $('#onlineText').title = names.length ? `آنلاین‌ها: ${names.join('، ')}` : 'فعلاً کسی آنلاین نیست';
     const miniCount = document.querySelector('.mini-count');
     if (miniCount) miniCount.textContent = `● ${label}`;
-  } catch (error) {
-    // Presence is optional; chat should continue working if it is temporarily unavailable.
-  }
+  } catch (error) {}
 }
 
 function startPresence() {
@@ -65,6 +93,8 @@ function showChat() {
   authView.classList.add('hidden');
   chatView.classList.remove('hidden');
   $('#onlineText').textContent = `در حال اتصال · ${username}`;
+  $('#myAvatar').textContent = avatarFor(username);
+  $('#myProfileName').textContent = username;
   loadMessages();
   startPresence();
   if (timer) clearInterval(timer);
@@ -75,6 +105,7 @@ function showChat() {
 function showAuth() {
   if (timer) clearInterval(timer);
   stopPresence();
+  closeProfile();
   chatView.classList.add('hidden');
   authView.classList.remove('hidden');
 }
@@ -87,8 +118,11 @@ function renderMessages(list) {
   messagesEl.innerHTML = list.map(m => {
     const mine = m.username === username ? ' mine' : '';
     const time = new Date(m.created_at).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
-    return `<article class="message${mine}"><div class="meta">${escapeHtml(m.username)} · ${time}</div><div class="body">${escapeHtml(m.text)}</div></article>`;
+    return `<article class="message${mine}" data-username="${escapeHtml(m.username)}"><button class="message-user" type="button"><span class="message-avatar avatar">${escapeHtml(avatarFor(m.username))}</span><span class="meta">${escapeHtml(m.username)} · ${time}</span></button><div class="body">${escapeHtml(m.text)}</div></article>`;
   }).join('');
+  messagesEl.querySelectorAll('.message-user').forEach(button => {
+    button.addEventListener('click', () => openProfile(button.closest('.message')?.dataset.username || ''));
+  });
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
@@ -151,6 +185,7 @@ $('#logout').addEventListener('click', async () => {
   showAuth();
 });
 
+setupProfileEvents();
 if (username) {
   usernameInput.value = username;
   showChat();
