@@ -9,7 +9,10 @@ async function hash(s) {
 
 function setMode(m) {
   mode = m;
-  $('submit').textContent = m === 'login' ? 'ورود' : 'ثبت نام';
+  $('submit').querySelector('span').textContent = m === 'login' ? 'ورود به دورهمی' : 'ساخت حساب کاربری';
+  $('loginTab').classList.toggle('active', m === 'login');
+  $('registerTab').classList.toggle('active', m === 'register');
+  $('password').autocomplete = m === 'login' ? 'current-password' : 'new-password';
   $('error').textContent = '';
 }
 
@@ -64,9 +67,7 @@ function escapeHtml(value) {
 function init() {
   $('loginTab').addEventListener('click', () => setMode('login'));
   $('registerTab').addEventListener('click', () => setMode('register'));
-  $('submit').addEventListener('click', auth);
-  $('auth').addEventListener('submit', auth);
-  $('password').addEventListener('keydown', e => { if (e.key === 'Enter') auth(e); });
+  $('authForm').addEventListener('submit', auth);
   $('logout').addEventListener('click', () => {
     localStorage.removeItem('user');
     location.reload();
@@ -84,6 +85,7 @@ function init() {
     loadMessages();
   });
 
+  setMode('login');
   try {
     const saved = JSON.parse(localStorage.getItem('user') || 'null');
     if (saved && saved.username) {
