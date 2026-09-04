@@ -11,7 +11,7 @@ form.onsubmit=async e=>{e.preventDefault();msg.textContent='';$('submit').disabl
 async function boot(){try{const d=await api('/api/me');if(d.authenticated){me=d.user;showChat();}}catch(err){console.warn('session check failed',err);}}
 function avatarStorageKey(userId=me?.id){return userId?`dorhami_avatar_${userId}`:'';}
 function getAvatar(userId=me?.id){try{const value=localStorage.getItem(avatarStorageKey(userId));return AVATARS.includes(value)?value:'🙂';}catch{return'🙂';}}
-function setAvatar(value){if(!AVATARS.includes(value)||!me)return;try{localStorage.setItem(avatarStorageKey(),value);}catch{}renderProfileAvatar();renderOnlineUsers();renderPrivateChats();if(privateUser)setPrivateHeader();renderHistory(document.querySelectorAll('.bubble').length?[]:[]);}
+function setAvatar(value){if(!AVATARS.includes(value)||!me)return;try{localStorage.setItem(avatarStorageKey(),value);}catch{}renderProfileAvatar();renderOnlineUsers();renderPrivateChats();if(privateUser)setPrivateHeader();}
 function renderProfileAvatar(){$('myAvatar').textContent=getAvatar();}
 function openAvatarPicker(){const box=$('avatarChoices');if(!box)return;const current=getAvatar();box.innerHTML=AVATARS.map(a=>`<button type="button" class="avatar-choice ${a===current?'selected':''}" data-avatar="${a}">${a}</button>`).join('');box.querySelectorAll('.avatar-choice').forEach(btn=>btn.onclick=()=>{setAvatar(btn.dataset.avatar);closeAvatarPicker();});$('avatarModal').classList.remove('hidden');}
 function closeAvatarPicker(){$('avatarModal').classList.add('hidden');}
