@@ -2,6 +2,8 @@
   const STYLE_ID='dorhami-vip-style';
   const BUTTON_ID='dorhamiVipButton';
   const MODAL_ID='dorhamiVipModal';
+  const BADGE_CLASS='dorhami-vip-badge';
+  let vipActive=false;
 
   function injectStyle(){
     if(document.getElementById(STYLE_ID))return;
@@ -16,6 +18,7 @@
       .dorhami-vip-list{display:grid;gap:9px;margin:0 0 18px;padding:0;list-style:none}.dorhami-vip-list li{padding:9px 11px;border-radius:11px;background:rgba(255,193,7,.12)}
       .dorhami-vip-actions{display:flex;gap:9px}.dorhami-vip-actions button{flex:1;border:0;border-radius:12px;padding:11px;font:inherit;font-weight:800;cursor:pointer}.dorhami-vip-close{background:#e9ecef;color:#333}.dark .dorhami-vip-close{background:#2a3742;color:#fff}.dorhami-vip-buy{background:linear-gradient(135deg,#ffd54a,#ffb300);color:#4b3500}
       .dorhami-vip-note{font-size:12px;opacity:.65;margin-top:12px}
+      .${BADGE_CLASS}{display:inline-flex;align-items:center;justify-content:center;margin-inline-start:5px;font-size:13px;line-height:1;vertical-align:middle;filter:drop-shadow(0 1px 2px rgba(0,0,0,.18))}
     `;document.head.appendChild(s);
   }
 
@@ -43,15 +46,47 @@
     wrap.addEventListener('click',e=>{if(e.target===wrap)closeModal()});
   }
 
-  function install(){
-    injectStyle();
-    if(document.getElementById(BUTTON_ID))return;
-    const actions=document.querySelector('.header-actions');
-    if(!actions)return;
-    const b=document.createElement('button');b.id=BUTTON_ID;b.type='button';b.title='عضویت VIP';b.textContent='👑 VIP';b.onclick=openModal;
-    actions.insertBefore(b,actions.firstChild);
+  function addBadge(el){
+    if(!vipActive||!el||el.querySelector(`.${BADGE_CLASS}`))return;
+    const badge=document.createElement('span');badge.className=BADGE_CLASS;badge.textContent='👑';badge.title='کاربر VIP';
+    el.appendChild(badge);
   }
 
-  const boot=()=>{install();setTimeout(install,500);setTimeout(install,1500)};
+  function applyBadges(){
+    if(!vipActive)return;
+    addBadge(document.querySelector('#me'));
+    document.querySelectorAll('.bubble.mine .name').forEach(addBadge);
+  }
+
+  async function loadVipStatus(){
+    try{
+      const response=await fetch('/api/vip/status',{cache:'no-store',credentials:'same-origin'});
+      if(!response.ok)return;
+      const data=await response.json();
+      vipActive=data.vip===true;
+      applyBadges();
+    }catch{}
+  }
+
+  function observeMessages(){
+    const box=document.getElementById('messages');
+    if(!box||box.dataset.vipObserved==='1')return;
+    box.dataset.vipObserved='1';
+    new MutationObserver(()=>applyBadges()).observe(box,{childList:true,subtree:true});
+    applyBadges();
+  }
+
+  function install(){
+    injectStyle();
+    const actions=document.querySelector('.header-actions');
+    if(actions&&!document.getElementById(BUTTON_ID)){
+      const b=document.createElement('button');b.id=BUTTON_ID;b.type='button';b.title='عضویت VIP';b.textContent='👑 VIP';b.onclick=openModal;
+      actions.insertBefore(b,actions.firstChild);
+    }
+    observeMessages();
+    loadVipStatus();
+  }
+
+  const boot=()=>{install();setTimeout(install,500);setTimeout(install,1500);setTimeout(install,3000)};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
