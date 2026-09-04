@@ -1,1 +1,96 @@
-const $=id=>document.getElementById(id);let mode='login',me=null;async function hash(s){return [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))].map(x=>x.toString(16).padStart(2,'0')).join('')}function set(m){mode=m;$('#submit').textContent=m==='login'?'ورود':'ثبت نام';$('#error').textContent=''}async function auth(){let u=$('#username').value.trim(),p=$('#password').value;if(!u||!p)return $('#error').textContent='نام کاربری و رمز عبور را وارد کن';try{let r=await fetch(mode==='login'?'/login':'/register',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:u,passwordHash:await hash(p)})}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error);me=d.user;localStorage.user=JSON.stringify(me);show()}catch(e){$('#error').textContent=e.message||'خطا'}}function show(){$('#auth').hidden=true;$('#chat').hidden=false;load()}async function load(){let d=await(await fetch('/messages')).json();if(d.ok)$('#messages').innerHTML=d.messages.map(x=>'<p><b>'+x.username+'</b>: '+x.text+'</p>').join('')}$('#loginTab').onclick=()=>set('login');$('#registerTab').onclick=()=>set('register');$('#submit').onclick=auth;$('#password').onkeydown=e=>e.key==='Enter'&&auth();$('#logout').onclick=()=>{localStorage.removeItem('user');location.reload()};$('#send').onsubmit=async e=>{e.preventDefault();let t=$('#text').value.trim();if(!t)return;await fetch('/messages',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:me.username,text:t})});$('#text').value='';load()};try{let x=JSON.parse(localStorage.user||'null');if(x?.username){me=x;show()}}catch{}
+const $ = (id) => document.getElementById(id);
+let mode = 'login';
+let me = null;
+
+async function hash(s) {
+  const data = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(data)].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
+function setMode(m) {
+  mode = m;
+  $('submit').textContent = m === 'login' ? 'ورود' : 'ثبت نام';
+  $('error').textContent = '';
+}
+
+async function auth(e) {
+  if (e) e.preventDefault();
+  const username = $('username').value.trim();
+  const password = $('password').value;
+  if (!username || !password) {
+    $('error').textContent = 'نام کاربری و رمز عبور را وارد کن';
+    return;
+  }
+  $('submit').disabled = true;
+  $('error').textContent = 'در حال بررسی...';
+  try {
+    const response = await fetch(mode === 'login' ? '/login' : '/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username, passwordHash: await hash(password) })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) throw new Error(data.error || `خطای سرور (${response.status})`);
+    me = data.user;
+    localStorage.setItem('user', JSON.stringify(me));
+    showChat();
+  } catch (err) {
+    $('error').textContent = err.message || 'خطا در اتصال';
+  } finally {
+    $('submit').disabled = false;
+  }
+}
+
+function showChat() {
+  $('auth').hidden = true;
+  $('chat').hidden = false;
+  loadMessages();
+}
+
+async function loadMessages() {
+  try {
+    const response = await fetch('/messages');
+    const data = await response.json();
+    if (data.ok) {
+      $('messages').innerHTML = data.messages.map(x => `<p><b>${escapeHtml(x.username)}</b>: ${escapeHtml(x.text)}</p>`).join('');
+    }
+  } catch (_) {}
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>'"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[c]));
+}
+
+function init() {
+  $('loginTab').addEventListener('click', () => setMode('login'));
+  $('registerTab').addEventListener('click', () => setMode('register'));
+  $('submit').addEventListener('click', auth);
+  $('auth').addEventListener('submit', auth);
+  $('password').addEventListener('keydown', e => { if (e.key === 'Enter') auth(e); });
+  $('logout').addEventListener('click', () => {
+    localStorage.removeItem('user');
+    location.reload();
+  });
+  $('send').addEventListener('submit', async e => {
+    e.preventDefault();
+    const text = $('text').value.trim();
+    if (!text) return;
+    await fetch('/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: me.username, text })
+    });
+    $('text').value = '';
+    loadMessages();
+  });
+
+  try {
+    const saved = JSON.parse(localStorage.getItem('user') || 'null');
+    if (saved && saved.username) {
+      me = saved;
+      showChat();
+    }
+  } catch (_) {}
+}
+
+document.addEventListener('DOMContentLoaded', init, { once: true });
