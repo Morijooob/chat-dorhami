@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "chat-dorhami",
-  "main": "src/worker.js",
+  "main": "src/worker-v4.js",
   "compatibility_date": "2026-09-02",
   "durable_objects": { "bindings": [{ "name": "DORHAMI", "class_name": "Dorhami" }] },
   "migrations": [{ "tag": "v2", "new_sqlite_classes": ["Dorhami"] }],
