@@ -1,0 +1,25 @@
+{
+  "$schema": "https://unpkg.com/wrangler@latest/config-schema.json",
+  "name": "chat-dorhami",
+  "main": "index.js",
+  "compatibility_date": "2026-09-04",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CHAT_ROOM",
+        "class_name": "ChatRoom"
+      }
+    ]
+  },
+  "exports": {
+    "ChatRoom": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  }
+}
