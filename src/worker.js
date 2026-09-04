@@ -194,6 +194,10 @@ export class Dorhami extends DurableObject {
   }
 }
 
+// Keep the previous Durable Object class export so Cloudflare can continue
+// deploying the existing ChatRoom namespace without requiring a destructive migration.
+export class ChatRoom extends Dorhami {}
+
 function cleanName(v) { return String(v || '').trim().normalize('NFKC'); }
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
