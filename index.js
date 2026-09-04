@@ -20,6 +20,7 @@ export class ChatRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.ready = this.initialize();
+    this.typing = new Map();
   }
 
   async initialize() {
@@ -152,6 +153,34 @@ export class ChatRoom extends DurableObject {
         return json({ ok: true });
       }
 
+      if (url.pathname === "/typing" && request.method === "POST") {
+        const body = await request.json().catch(() => ({}));
+        const username = String(body.username || "").trim();
+        const context = String(body.context || "public").trim();
+        const isTyping = Boolean(body.typing);
+        if (!username || username.length > 24 || !context || context.length > 80) return json({ error: "اطلاعات تایپ نامعتبر است." }, 400);
+        const key = `${context}|${username}`;
+        if (isTyping) this.typing.set(key, Date.now());
+        else this.typing.delete(key);
+        return json({ ok: true });
+      }
+
+      if (url.pathname === "/typing" && request.method === "GET") {
+        const context = String(url.searchParams.get("context") || "public").trim();
+        const me = String(url.searchParams.get("me") || "").trim();
+        const now = Date.now();
+        for (const [key, time] of this.typing) if (now - time > 5000) this.typing.delete(key);
+        const prefix = `${context}|`;
+        const users = [];
+        for (const [key, time] of this.typing) {
+          if (key.startsWith(prefix) && now - time <= 5000) {
+            const name = key.slice(prefix.length);
+            if (name && name !== me) users.push(name);
+          }
+        }
+        return json({ ok: true, users: [...new Set(users)] });
+      }
+
       if (url.pathname === "/messages" && request.method === "GET") {
         const rows = this.ctx.storage.sql.exec("SELECT id, username, text, created_at FROM messages ORDER BY id DESC LIMIT 100").toArray().reverse();
         return json({ ok: true, messages: rows });
@@ -250,7 +279,7 @@ export class ChatRoom extends DurableObject {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const apiPaths = new Set(["/health", "/register", "/login", "/profile", "/users", "/presence", "/messages", "/reactions", "/private-messages", "/private-unread", "/private-read"]);
+    const apiPaths = new Set(["/health", "/register", "/login", "/profile", "/users", "/presence", "/typing", "/messages", "/reactions", "/private-messages", "/private-unread", "/private-read"]);
     if (apiPaths.has(url.pathname)) {
       try {
         const id = env.CHAT_ROOM.idFromName("public-room");
@@ -259,10 +288,6 @@ export default {
         return json({ error: "اتصال سرور برقرار نشد.", detail: String(error?.message || error) }, 500);
       }
     }
-    try {
-      return await env.ASSETS.fetch(request);
-    } catch (error) {
-      return new Response("Chat Dorhami is starting...", { status: 503, headers: { "content-type": "text/plain; charset=UTF-8" } });
-    }
+    return env.ASSETS.fetch(request);
   }
 };
