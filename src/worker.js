@@ -37,7 +37,10 @@ export class Dorhami extends DurableObject {
       if (url.pathname === '/api/register' && request.method === 'POST') return this.register(request);
       if (url.pathname === '/api/login' && request.method === 'POST') return this.login(request);
       if (url.pathname === '/api/logout' && request.method === 'POST') return this.logout(request);
-      if (url.pathname === '/api/me') return json({ authenticated: !!(await this.auth(request)), user: await this.auth(request) });
+      if (url.pathname === '/api/me') {
+        const user = await this.auth(request);
+        return json({ authenticated: !!user, user });
+      }
       if (url.pathname === '/api/rooms') return this.rooms(request);
       if (url.pathname === '/ws') return this.websocket(request);
       return json({ error: 'Not found' }, 404);
@@ -52,11 +55,17 @@ export class Dorhami extends DurableObject {
     const name = cleanName(username);
     if (!/^[\p{L}\p{N}_-]{3,24}$/u.test(name)) return json({ error: 'نام کاربری باید ۳ تا ۲۴ کاراکتر باشد.' }, 400);
     if (String(password || '').length < 6) return json({ error: 'رمز عبور باید حداقل ۶ کاراکتر باشد.' }, 400);
-    if (this.state.storage.sql.exec('SELECT id FROM users WHERE username=?', name).one()) return json({ error: 'این نام کاربری قبلاً ثبت شده است.' }, 409);
+
+    // Do not use .one() here: a new username normally returns zero rows,
+    // and Cloudflare's SqlStorageCursor.one() throws when the result is empty.
+    const existing = this.state.storage.sql.exec('SELECT id FROM users WHERE username=? LIMIT 1', name).toArray()[0];
+    if (existing) return json({ error: 'این نام کاربری قبلاً ثبت شده است.' }, 409);
+
     const salt = randomBytes(16);
     const hash = await derive(String(password), salt);
     this.state.storage.sql.exec('INSERT INTO users(username,password_hash,salt,created_at) VALUES(?,?,?,?)', name, hash, b64(salt), Date.now());
-    const user = this.state.storage.sql.exec('SELECT id,username FROM users WHERE username=?', name).one();
+    const user = this.state.storage.sql.exec('SELECT id,username FROM users WHERE username=? LIMIT 1', name).toArray()[0];
+    if (!user) return json({ error: 'ساخت حساب انجام نشد.' }, 500);
     return withCookie(json({ ok: true, user }), await this.session(user.id));
   }
 
@@ -64,7 +73,9 @@ export class Dorhami extends DurableObject {
     const { username, password } = await readJson(request);
     const name = cleanName(username);
     if (!name || !password) return json({ error: 'نام کاربری و رمز عبور را وارد کن.' }, 400);
-    const user = this.state.storage.sql.exec('SELECT id,username,password_hash,salt FROM users WHERE username=?', name).one();
+
+    // Do not use .one() here: an unknown username returns zero rows.
+    const user = this.state.storage.sql.exec('SELECT id,username,password_hash,salt FROM users WHERE username=? LIMIT 1', name).toArray()[0];
     if (!user) return json({ error: 'نام کاربری یا رمز عبور اشتباه است.' }, 401);
     if (!safeEqual(user.password_hash, await derive(String(password), fromB64(user.salt)))) return json({ error: 'نام کاربری یا رمز عبور اشتباه است.' }, 401);
     return withCookie(json({ ok: true, user: { id: user.id, username: user.username } }), await this.session(user.id));
@@ -79,7 +90,8 @@ export class Dorhami extends DurableObject {
   async auth(request) {
     const token = cookie(request, COOKIE);
     if (!token) return null;
-    return this.state.storage.sql.exec('SELECT u.id,u.username FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?', await sha256(token), Date.now()).one() || null;
+    // No session is a normal state, so consume the cursor safely instead of .one().
+    return this.state.storage.sql.exec('SELECT u.id,u.username FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>? LIMIT 1', await sha256(token), Date.now()).toArray()[0] || null;
   }
 
   async logout(request) {
@@ -130,7 +142,7 @@ export class Dorhami extends DurableObject {
     if (!body || body.length > 2000) return;
     const now = Date.now();
     this.state.storage.sql.exec('INSERT INTO messages(room,user_id,username,body,created_at) VALUES(?,?,?,?,?)', ROOM, user.id, user.username, body, now);
-    const message = this.state.storage.sql.exec('SELECT id,username,body,created_at FROM messages ORDER BY id DESC LIMIT 1').one();
+    const message = this.state.storage.sql.exec('SELECT id,username,body,created_at FROM messages WHERE room=? ORDER BY id DESC LIMIT 1', ROOM).one();
     this.broadcast({ type:'message', message });
   }
 
