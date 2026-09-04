@@ -73,9 +73,12 @@ function openProfile(name) {
   const profile = $('#profilePopover');
   if (!profile) return;
   const clean = String(name || '').trim();
+  const isMine = clean === username;
   $('#profileAvatar').textContent = avatarFor(clean);
   $('#profileUsername').textContent = clean || 'کاربر';
-  $('#profileStatus').textContent = clean === username ? 'پروفایل من' : 'عضو دورهمی';
+  $('#profileStatus').textContent = isMine ? 'پروفایل من' : 'عضو دورهمی';
+  $('#profileKickerText').textContent = isMine ? 'پروفایل من' : 'پروفایل کاربر';
+  $('#profilePrivateBtn')?.classList.toggle('hidden', isMine || !clean);
   profile.classList.remove('hidden');
 }
 
@@ -129,6 +132,11 @@ function setupProfileEvents() {
   });
   $('#profileAvatar')?.addEventListener('click', () => {
     if (String($('#profileUsername')?.textContent || '') === username) openAvatarPicker();
+  });
+  $('#profilePrivateBtn')?.addEventListener('click', async () => {
+    const target = String($('#profileUsername')?.textContent || '').trim();
+    closeProfile();
+    await openPrivateChat(target);
   });
   $('#profileClose')?.addEventListener('click', closeProfile);
   $('#avatarPickerClose')?.addEventListener('click', closeAvatarPicker);
