@@ -1,1 +1,76 @@
-<!doctype html><html lang="fa" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>چت دورهمی</title><link rel="stylesheet" href="/style.css"><main><section id="auth"><h1>چت دورهمی</h1><button id="loginTab">ورود</button><button id="registerTab">ثبت نام</button><input id="username" placeholder="نام کاربری"><input id="password" type="password" placeholder="رمز عبور"><button id="submit">ورود</button><p id="error"></p></section><section id="chat" hidden><b>اتاق عمومی دورهمی</b><button id="logout">خروج</button><div id="messages"></div><form id="send"><input id="text" placeholder="پیامت را بنوی..."><button>ارسال</button></form></section><script src="/app.js"></script></main>
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#090b1a">
+  <title>چت دورهمی | با هم آنلاین باشیم</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+  <div class="stars" aria-hidden="true"></div>
+
+  <main class="shell">
+    <section id="auth" class="auth-card" aria-label="ورود به چت دورهمی">
+      <div class="brand">
+        <div class="brand-mark"><span>✦</span></div>
+        <div>
+          <div class="eyebrow">WELCOME TO</div>
+          <h1>چت دورهمی</h1>
+        </div>
+      </div>
+
+      <div class="hero-copy">
+        <h2>اینجا دورهمی شروع میشه<span>.</span></h2>
+        <p>وارد جمع شو، با آدم‌ها حرف بزن و لحظه‌های خوب بساز.</p>
+      </div>
+
+      <div class="auth-tabs" role="tablist">
+        <button id="loginTab" class="tab active" type="button" role="tab">ورود</button>
+        <button id="registerTab" class="tab" type="button" role="tab">ثبت نام</button>
+      </div>
+
+      <form id="authForm" class="auth-form">
+        <label for="username">نام کاربری</label>
+        <div class="input-wrap">
+          <span>◉</span>
+          <input id="username" autocomplete="username" maxlength="24" placeholder="مثلاً mori" required>
+        </div>
+
+        <label for="password">رمز عبور</label>
+        <div class="input-wrap">
+          <span>◆</span>
+          <input id="password" type="password" autocomplete="current-password" placeholder="رمز عبور خودت را وارد کن" required>
+        </div>
+
+        <button id="submit" class="primary-btn" type="submit">
+          <span>ورود به دورهمی</span><b>←</b>
+        </button>
+        <p id="error" class="status" role="alert"></p>
+      </form>
+
+      <div class="online-badge"><i></i><span>اتاق دورهمی در دسترس است</span></div>
+      <div class="footer-note">یک فضای دوستانه برای گفت‌وگو و آشنایی</div>
+    </section>
+
+    <section id="chat" class="chat-card" hidden>
+      <header class="chat-head">
+        <div><strong>اتاق عمومی دورهمی</strong><small>جمع دوستانه آنلاین</small></div>
+        <button id="logout" type="button">خروج</button>
+      </header>
+      <div id="messages" class="messages"></div>
+      <form id="send" class="send-box">
+        <input id="text" placeholder="پیامت را بنوی..." autocomplete="off">
+        <button type="submit">ارسال</button>
+      </form>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
