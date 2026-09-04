@@ -36,11 +36,20 @@ export class ChatRoom extends DurableObject {
         text TEXT NOT NULL,
         created_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS private_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sender TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        text TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS presence (
         username TEXT PRIMARY KEY,
         last_seen INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS messages_created_at ON messages(created_at);
+      CREATE INDEX IF NOT EXISTS private_messages_pair ON private_messages(sender, recipient, id);
+      CREATE INDEX IF NOT EXISTS private_messages_created_at ON private_messages(created_at);
       CREATE INDEX IF NOT EXISTS presence_last_seen ON presence(last_seen);
     `);
   }
@@ -74,6 +83,11 @@ export class ChatRoom extends DurableObject {
         const rows = this.ctx.storage.sql.exec("SELECT username, password_hash FROM users WHERE username = ? LIMIT 1", username).toArray();
         if (!rows.length || rows[0].password_hash !== await hashPassword(password)) return json({ error: "نام کاربری یا رمز عبور اشتباه است." }, 401);
         return json({ ok: true, username: rows[0].username });
+      }
+
+      if (request.method === "GET" && url.pathname === "/users") {
+        const rows = this.ctx.storage.sql.exec("SELECT username FROM users ORDER BY username COLLATE NOCASE").toArray();
+        return json({ ok: true, users: rows });
       }
 
       if (url.pathname === "/presence" && request.method === "POST") {
@@ -116,6 +130,31 @@ export class ChatRoom extends DurableObject {
         return json({ ok: true, message: row });
       }
 
+      if (url.pathname === "/private-messages" && request.method === "GET") {
+        const me = String(url.searchParams.get("me") || "").trim();
+        const withUser = String(url.searchParams.get("with") || "").trim();
+        if (!me || !withUser || me === withUser) return json({ error: "گفتگوی خصوصی نامعتبر است." }, 400);
+        const rows = this.ctx.storage.sql.exec(
+          "SELECT id, sender, recipient, text, created_at FROM private_messages WHERE (sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?) ORDER BY id ASC LIMIT 200",
+          me, withUser, withUser, me
+        ).toArray();
+        return json({ ok: true, messages: rows });
+      }
+
+      if (url.pathname === "/private-messages" && request.method === "POST") {
+        const body = await request.json();
+        const sender = String(body.sender || "").trim();
+        const recipient = String(body.recipient || "").trim();
+        const text = String(body.text || "").trim();
+        if (!sender || !recipient || sender === recipient || !text || text.length > 1000) return json({ error: "پیام خصوصی نامعتبر است." }, 400);
+        const user = this.ctx.storage.sql.exec("SELECT username FROM users WHERE username = ? LIMIT 1", recipient).toArray();
+        if (!user.length) return json({ error: "این کاربر پیدا نشد." }, 404);
+        const now = Date.now();
+        this.ctx.storage.sql.exec("INSERT INTO private_messages (sender, recipient, text, created_at) VALUES (?, ?, ?, ?)", sender, recipient, text, now);
+        const row = this.ctx.storage.sql.exec("SELECT id, sender, recipient, text, created_at FROM private_messages WHERE id = last_insert_rowid()").toArray()[0];
+        return json({ ok: true, message: row });
+      }
+
       return json({ error: "مسیر پیدا نشد." }, 404);
     } catch (error) {
       return json({ error: "خطای داخلی سرور", detail: String(error?.message || error) }, 500);
@@ -126,7 +165,7 @@ export class ChatRoom extends DurableObject {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const apiPaths = new Set(["/health", "/register", "/login", "/presence", "/messages"]);
+    const apiPaths = new Set(["/health", "/register", "/login", "/users", "/presence", "/messages", "/private-messages"]);
     if (apiPaths.has(url.pathname)) {
       try {
         const id = env.CHAT_ROOM.idFromName("public-room");
