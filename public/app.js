@@ -19,7 +19,14 @@ function handle(d){
   if(d.type==='presence'){$('online').textContent=fa(d.count)+' آنلاین';$('users').innerHTML=d.users.map(u=>`<div class="user ${u.id===me?.id?'self':''}" data-user-id="${Number(u.id)}"><span>🟢</span><b>${esc(u.username)}</b>${u.id===me?.id?'<small> شما</small>':'<em>چت خصوصی</em>'}</div>`).join('');document.querySelectorAll('.user[data-user-id]').forEach(el=>{if(Number(el.dataset.userId)!==Number(me?.id))el.onclick=()=>openPrivate(Number(el.dataset.userId));});return;}
   if(d.type==='private_opened'){privateUser=d.user;setPrivateHeader();renderHistory(d.messages||[]);return;}
   if(d.type==='private_history'){if(privateUser&&Number(d.user?.id)===Number(privateUser.id))renderHistory(d.messages||[]);return;}
-  if(d.type==='private_message'){if(privateUser&&Number(d.from?.id)===Number(privateUser.id))addMessage(d.message);else if(!privateUser)toast(`پیام خصوصی جدید از ${d.from?.username||'کاربر'}`);return;}
+  if(d.type==='private_message'){
+    const fromId=Number(d.from?.id);
+    const myId=Number(me?.id);
+    const targetId=Number(privateUser?.id);
+    if(privateUser&&(fromId===targetId||fromId===myId))addMessage(d.message);
+    else if(!privateUser)toast(`پیام خصوصی جدید از ${d.from?.username||'کاربر'}`);
+    return;
+  }
   if(d.type==='private_error'){toast(d.error||'باز کردن چت خصوصی انجام نشد.');return;}
   if(d.type==='pong')return;
 }
