@@ -1,1 +1,20 @@
-{"name":"chat-dorhami","main":"index.js","compatibility_date":"2026-09-01","durable_objects":{"bindings":[{"name":"CHAT_ROOM","class_name":"ChatRoom"}]},"exports":{"ChatRoom":{"type":"durable-object","storage":"sqlite"}},"assets":{"directory":"./public"}}
+{
+  "name": "chat-dorhami",
+  "main": "index.js",
+  "compatibility_date": "2026-09-01",
+  "durable_objects": {
+    "bindings": [
+      { "name": "CHAT_ROOM", "class_name": "ChatRoom" }
+    ]
+  },
+  "exports": {
+    "ChatRoom": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  }
+}
