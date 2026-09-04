@@ -14,6 +14,10 @@
     .reaction.has-count{display:inline-flex;background:rgba(124,140,255,.1);border-color:rgba(167,139,250,.28)}
     .reaction span{font-size:14px;line-height:1}.reaction-count{font-size:9px;color:#c4b5fd;font-weight:900;line-height:1}
     .reaction:disabled{opacity:.65;cursor:wait}
+    .profile-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;margin-top:12px}
+    .profile-action{padding:10px 8px;border:1px solid rgba(255,255,255,.09);border-radius:12px;background:rgba(255,255,255,.045);color:#fff;font-size:10px;font-weight:800;cursor:pointer;transition:.15s ease}
+    .profile-action:hover{transform:translateY(-1px);background:rgba(124,140,255,.12);border-color:rgba(167,139,250,.25)}
+    .profile-action.copied{background:rgba(52,211,153,.14);border-color:rgba(52,211,153,.3)}
   `;
   document.head.appendChild(style);
 
@@ -99,14 +103,44 @@
     if (fresh.length) loadReactions(fresh);
   };
 
+  const enhanceProfile = () => {
+    const profile = document.querySelector('#profilePopover');
+    if (!profile || profile.classList.contains('hidden') || profile.querySelector('.profile-actions')) return;
+    const usernameEl = profile.querySelector('#profileUsername');
+    if (!usernameEl) return;
+    const actions = document.createElement('div');
+    actions.className = 'profile-actions';
+    actions.innerHTML = '<button class="profile-action" type="button" data-profile-action="copy">📋 کپی نام کاربری</button><button class="profile-action" type="button" data-profile-action="share">📤 اشتراک پروفایل</button>';
+    const hint = profile.querySelector('.profile-hint');
+    (hint || profile.lastElementChild)?.before(actions);
+    actions.addEventListener('click', async event => {
+      const button = event.target.closest('.profile-action');
+      if (!button) return;
+      const name = String(usernameEl.textContent || '').trim();
+      if (!name || name === 'کاربر') return;
+      if (button.dataset.profileAction === 'copy') {
+        try {
+          await navigator.clipboard.writeText(name);
+          button.textContent = '✅ نام کاربری کپی شد';
+          button.classList.add('copied');
+          setTimeout(() => { button.textContent = '📋 کپی نام کاربری'; button.classList.remove('copied'); }, 1400);
+        } catch (error) {}
+      } else if (navigator.share) {
+        try { await navigator.share({ title: 'پروفایل دورهمی', text: `پروفایل ${name} در چت دورهمی` }); } catch (error) {}
+      } else {
+        try { await navigator.clipboard.writeText(`پروفایل ${name} در چت دورهمی`); } catch (error) {}
+        button.textContent = '✅ متن پروفایل کپی شد';
+        setTimeout(() => { button.textContent = '📤 اشتراک پروفایل'; }, 1400);
+      }
+    });
+  };
+
   document.addEventListener('click', event => {
     if (event.target.closest('.reaction-bar')) return;
     document.querySelectorAll('.reaction-picker').forEach(picker => picker.classList.add('hidden'));
     document.querySelectorAll('.reaction-trigger').forEach(button => button.classList.remove('open'));
   });
 
-  // The chat refreshes every 2.5s. Remember the user's scroll position so the
-  // public room does not jump back to the bottom while they are reading.
   let savedScrollTop = 0;
   let wasNearBottom = true;
   const rememberScroll = () => {
@@ -128,12 +162,16 @@
   const observer = new MutationObserver(() => {
     restoreScroll();
     addBars();
+    enhanceProfile();
   });
   const start = () => {
     const messages = document.querySelector('#messages');
     if (!messages) return;
     observer.observe(messages, { childList: true, subtree: true });
+    const profile = document.querySelector('#profilePopover');
+    if (profile) new MutationObserver(enhanceProfile).observe(profile, { childList: true, subtree: true, attributes: true });
     addBars();
+    enhanceProfile();
     setInterval(() => loadReactions([...document.querySelectorAll('#messages .message')]), 5000);
   };
 
