@@ -54,11 +54,19 @@ export class ChatRoom extends DurableObject {
         username TEXT PRIMARY KEY,
         last_seen INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS message_reactions (
+        message_key TEXT NOT NULL,
+        username TEXT NOT NULL,
+        emoji TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (message_key, username, emoji)
+      );
       CREATE INDEX IF NOT EXISTS messages_created_at ON messages(created_at);
       CREATE INDEX IF NOT EXISTS private_messages_pair ON private_messages(sender, recipient, id);
       CREATE INDEX IF NOT EXISTS private_messages_created_at ON private_messages(created_at);
       CREATE INDEX IF NOT EXISTS private_messages_recipient_id ON private_messages(recipient, id);
       CREATE INDEX IF NOT EXISTS presence_last_seen ON presence(last_seen);
+      CREATE INDEX IF NOT EXISTS message_reactions_key ON message_reactions(message_key);
     `);
     try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN avatar TEXT NOT NULL DEFAULT '👤'"); } catch (error) {}
   }
@@ -160,6 +168,38 @@ export class ChatRoom extends DurableObject {
         return json({ ok: true, message: row });
       }
 
+      if (url.pathname === "/reactions" && request.method === "GET") {
+        const keys = [...new Set((url.searchParams.get("keys") || "").split(",").map(value => value.trim()).filter(Boolean))].slice(0, 100);
+        if (!keys.length) return json({ ok: true, reactions: {} });
+        const placeholders = keys.map(() => "?").join(",");
+        const rows = this.ctx.storage.sql.exec(`SELECT message_key, emoji, COUNT(*) AS count FROM message_reactions WHERE message_key IN (${placeholders}) GROUP BY message_key, emoji ORDER BY message_key, emoji`, ...keys).toArray();
+        const reactions = {};
+        rows.forEach(row => {
+          reactions[row.message_key] ||= {};
+          reactions[row.message_key][row.emoji] = Number(row.count || 0);
+        });
+        return json({ ok: true, reactions });
+      }
+
+      if (url.pathname === "/reactions" && request.method === "POST") {
+        const body = await request.json();
+        const messageKey = String(body.messageKey || "").trim();
+        const username = String(body.username || "").trim();
+        const emoji = String(body.emoji || "").trim();
+        const allowed = new Set(["❤️","😂","😍","👍","🔥"]);
+        if (!messageKey || messageKey.length > 160 || !username || username.length > 24 || !allowed.has(emoji)) return json({ error: "واکنش نامعتبر است." }, 400);
+        const existing = this.ctx.storage.sql.exec("SELECT 1 FROM message_reactions WHERE message_key = ? AND username = ? AND emoji = ? LIMIT 1", messageKey, username, emoji).toArray();
+        if (existing.length) {
+          this.ctx.storage.sql.exec("DELETE FROM message_reactions WHERE message_key = ? AND username = ? AND emoji = ?", messageKey, username, emoji);
+        } else {
+          this.ctx.storage.sql.exec("INSERT INTO message_reactions (message_key, username, emoji, created_at) VALUES (?, ?, ?, ?)", messageKey, username, emoji, Date.now());
+        }
+        const rows = this.ctx.storage.sql.exec("SELECT emoji, COUNT(*) AS count FROM message_reactions WHERE message_key = ? GROUP BY emoji ORDER BY emoji", messageKey).toArray();
+        const reactions = {};
+        rows.forEach(row => { reactions[row.emoji] = Number(row.count || 0); });
+        return json({ ok: true, reactions });
+      }
+
       if (url.pathname === "/private-messages" && request.method === "GET") {
         const me = String(url.searchParams.get("me") || "").trim();
         const withUser = String(url.searchParams.get("with") || "").trim();
@@ -210,7 +250,7 @@ export class ChatRoom extends DurableObject {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const apiPaths = new Set(["/health", "/register", "/login", "/profile", "/users", "/presence", "/messages", "/private-messages", "/private-unread", "/private-read"]);
+    const apiPaths = new Set(["/health", "/register", "/login", "/profile", "/users", "/presence", "/messages", "/reactions", "/private-messages", "/private-unread", "/private-read"]);
     if (apiPaths.has(url.pathname)) {
       try {
         const id = env.CHAT_ROOM.idFromName("public-room");
