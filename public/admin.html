@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>پنل مدیریت | چت دورهمی</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Tahoma,Arial,sans-serif;background:#f4f6fb;color:#182033}button,input{font:inherit}.wrap{max-width:980px;margin:auto;padding:24px}.card{background:#fff;border-radius:20px;padding:22px;margin:14px 0;box-shadow:0 8px 30px #0000000d}.login{max-width:430px;margin:70px auto}.brand{text-align:center;font-size:28px;font-weight:800;margin-bottom:8px}.sub{text-align:center;color:#687086;margin-bottom:22px}.field{margin:12px 0}.field label{display:block;margin-bottom:7px;font-weight:700}.field input{width:100%;padding:13px;border:1px solid #d8deea;border-radius:12px;outline:none}.btn{border:0;border-radius:12px;padding:12px 18px;cursor:pointer;background:#4f46e5;color:#fff;font-weight:700}.btn.secondary{background:#eef0f6;color:#263047}.btn.danger{background:#dc2626}.actions{display:flex;gap:10px;flex-wrap:wrap}.error{color:#b91c1c;margin-top:10px}.hidden{display:none}.top{display:flex;justify-content:space-between;align-items:center;gap:12px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.stat{background:#f7f8fc;border-radius:14px;padding:16px}.stat b{display:block;font-size:25px;margin-top:6px}.table{width:100%;border-collapse:collapse}.table th,.table td{padding:11px;border-bottom:1px solid #edf0f5;text-align:right}.note{color:#687086;font-size:13px}.ok{color:#15803d}.modal{max-width:430px}.badge{display:inline-block;background:#fef3c7;color:#92400e;padding:4px 9px;border-radius:999px;font-size:12px}@media(max-width:700px){.stats{grid-template-columns:repeat(2,1fr)}.wrap{padding:12px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<section id="loginCard" class="card login">
+<div class="brand">👑 پنل مدیریت دورهمی</div><div class="sub">ورود مدیر سایت</div>
+<form id="loginForm">
+<div class="field"><label>نام کاربری</label><input id="username" value="admin" autocomplete="username" required></div>
+<div class="field"><label>رمز مدیریت</label><input id="password" type="password" autocomplete="current-password" required></div>
+<button class="btn" style="width:100%">ورود به پنل</button><div id="loginError" class="error"></div>
+</form>
+</section>
+<section id="panel" class="hidden">
+<div class="card top"><div><h1 style="margin:0">👑 مدیریت چت دورهمی</h1><div class="note">مدیر: <span id="adminName"></span></div></div><button id="logout" class="btn danger">خروج</button></div>
+<div class="stats">
+<div class="stat">👥 کاربران<b id="usersCount">0</b></div><div class="stat">🟢 آنلاین<b id="onlineCount">0</b></div><div class="stat">💬 پیام‌ها<b id="messagesCount">0</b></div><div class="stat">👑 VIP فعال<b id="vipCount">0</b></div>
+</div>
+<div class="card"><div class="top"><h2>کاربران</h2><span class="badge">۱۰۰ کاربر آخر</span></div><div style="overflow:auto"><table class="table"><thead><tr><th>شناسه</th><th>نام کاربری</th><th>تاریخ ثبت</th></tr></thead><tbody id="usersBody"></tbody></table></div></div>
+<div class="card"><h2>تغییر رمز مدیریت</h2><div class="field"><label>رمز فعلی</label><input id="currentPassword" type="password" autocomplete="current-password"></div><div class="field"><label>رمز جدید</label><input id="newPassword" type="password" autocomplete="new-password" minlength="8"></div><div class="actions"><button id="changePassword" class="btn">ذخیره رمز جدید</button></div><div id="passwordMessage" class="note" style="margin-top:10px"></div></div>
+</section>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+async function api(path,opt={}){const r=await fetch(path,{credentials:'same-origin',...opt,headers:{'Content-Type':'application/json',...(opt.headers||{})}});let d={};try{d=await r.json()}catch{};if(!r.ok)throw new Error(d.error||'خطا');return d}
+function showPanel(admin){$('loginCard').classList.add('hidden');$('panel').classList.remove('hidden');$('adminName').textContent=admin.username}
+function showLogin(){$('panel').classList.add('hidden');$('loginCard').classList.remove('hidden')}
+async function load(){try{const d=await api('/api/admin/dashboard');showPanel(d.admin);$('usersCount').textContent=d.stats.users;$('onlineCount').textContent=d.stats.online;$('messagesCount').textContent=d.stats.messages;$('vipCount').textContent=d.stats.vip;$('usersBody').innerHTML=d.users.map(u=>`<tr><td>${u.id}</td><td>${escapeHtml(u.username)}</td><td>${new Date(u.created_at).toLocaleString('fa-IR')}</td></tr>`).join('')}catch(e){showLogin()}}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+$('loginForm').addEventListener('submit',async e=>{e.preventDefault();$('loginError').textContent='';try{const d=await api('/api/admin/login',{method:'POST',body:JSON.stringify({username:$('username').value,password:$('password').value})});showPanel(d.admin);await load()}catch(e){$('loginError').textContent=e.message}});
+$('logout').onclick=async()=>{try{await api('/api/admin/logout',{method:'POST'})}finally{showLogin()}};
+$('changePassword').onclick=async()=>{const msg=$('passwordMessage');msg.textContent='';try{const d=await api('/api/admin/password',{method:'POST',body:JSON.stringify({currentPassword:$('currentPassword').value,newPassword:$('newPassword').value})});msg.className='note ok';msg.textContent=d.message;$('currentPassword').value='';$('newPassword').value=''}catch(e){msg.className='note error';msg.textContent=e.message}};
+load();
+</script>
+</body></html>
