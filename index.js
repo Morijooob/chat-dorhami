@@ -1,1 +1,114 @@
-const j=(d,s=200)=>new Response(JSON.stringify(d),{status:s,headers:{"content-type":"application/json"}});export class ChatRoom{constructor(s){this.s=s;this.ready=this.init()}async init(){this.s.storage.sql.exec('CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL);CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,text TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP)')}async fetch(r){await this.ready;let u=new URL(r.url),b=await r.json().catch(()=>null);if((u.pathname==='/register'||u.pathname==='/login')&&r.method==='POST'){if(!b)return j({ok:false,error:'درخواست نامعتبر است'},400);let n=String(b.username||'').trim(),p=String(b.passwordHash||'');if(!/^[\p{L}\p{N}_]{3,24}$/u.test(n)||!/^[a-f0-9]{64}$/i.test(p))return j({ok:false,error:'نام کاربری یا رمز عبور نامعتبر است'},400);if(u.pathname==='/register'){if([...this.s.storage.sql.exec('SELECT id FROM users WHERE username=?',n)].length)return j({ok:false,error:'این نام کاربری قبلاً ثبت شده است'},409);let q=this.s.storage.sql.exec('INSERT INTO users(username,password_hash) VALUES(?,?)',n,p);return j({ok:true,user:{id:Number(q.lastInsertRowId),username:n}},201)}let x=[...this.s.storage.sql.exec('SELECT id,username FROM users WHERE username=? AND password_hash=?',n,p)];return x.length?j({ok:true,user:x[0]}):j({ok:false,error:'نام کاربری یا رمز عبور اشتباه است'},401)}if(u.pathname==='/messages'&&r.method==='GET')return j({ok:true,messages:[...this.s.storage.sql.exec('SELECT id,username,text,created_at FROM messages ORDER BY id DESC LIMIT 100')].reverse()});if(u.pathname==='/messages'&&r.method==='POST'){if(!b)return j({ok:false,error:'درخواست نامعتبر است'},400);let n=String(b.username||'').trim(),t=String(b.text||'').trim();if(!n||!t)return j({ok:false,error:'پیام نامعتبر است'},400);this.s.storage.sql.exec('INSERT INTO messages(username,text) VALUES(?,?)',n,t);return j({ok:true})}return j({ok:false,error:'Not found'},404)}}export default{async fetch(r,e){let u=new URL(r.url);if(u.pathname==='/login'||u.pathname==='/register'||u.pathname==='/messages')return e.CHAT_ROOM.get(e.CHAT_ROOM.idFromName('chat-dorhami-global')).fetch(r);let t=new URL(r.url);return e.ASSETS.fetch(new Request(t,r))}};
+import { DurableObject } from "cloudflare:workers";
+
+const json = (data, status = 200) => new Response(JSON.stringify(data), {
+  status,
+  headers: { "content-type": "application/json; charset=utf-8" },
+});
+
+export class ChatRoom extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.ctx = ctx;
+    this.ready = this.init();
+  }
+
+  async init() {
+    this.ctx.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL,
+        text TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  }
+
+  async fetch(request) {
+    await this.ready;
+    const url = new URL(request.url);
+    const body = await request.json().catch(() => null);
+
+    if ((url.pathname === "/register" || url.pathname === "/login") && request.method === "POST") {
+      if (!body) return json({ ok: false, error: "درخواست نامعتبر است" }, 400);
+
+      const username = String(body.username || "").trim();
+      const passwordHash = String(body.passwordHash || "");
+
+      if (!/^[\p{L}\p{N}_]{3,24}$/u.test(username) || !/^[a-f0-9]{64}$/i.test(passwordHash)) {
+        return json({ ok: false, error: "نام کاربری یا رمز عبور نامعتبر است" }, 400);
+      }
+
+      if (url.pathname === "/register") {
+        const existing = [...this.ctx.storage.sql.exec(
+          "SELECT id FROM users WHERE username = ?",
+          username
+        )];
+        if (existing.length) return json({ ok: false, error: "این نام کاربری قبلاً ثبت شده است" }, 409);
+
+        this.ctx.storage.sql.exec(
+          "INSERT INTO users(username, password_hash) VALUES(?, ?)",
+          username,
+          passwordHash
+        );
+
+        const user = [...this.ctx.storage.sql.exec(
+          "SELECT id, username FROM users WHERE username = ?",
+          username
+        )][0];
+
+        return json({ ok: true, user }, 201);
+      }
+
+      const users = [...this.ctx.storage.sql.exec(
+        "SELECT id, username FROM users WHERE username = ? AND password_hash = ?",
+        username,
+        passwordHash
+      )];
+
+      return users.length
+        ? json({ ok: true, user: users[0] })
+        : json({ ok: false, error: "نام کاربری یا رمز عبور اشتباه است" }, 401);
+    }
+
+    if (url.pathname === "/messages" && request.method === "GET") {
+      const messages = [...this.ctx.storage.sql.exec(
+        "SELECT id, username, text, created_at FROM messages ORDER BY id DESC LIMIT 100"
+      )].reverse();
+      return json({ ok: true, messages });
+    }
+
+    if (url.pathname === "/messages" && request.method === "POST") {
+      if (!body) return json({ ok: false, error: "درخواست نامعتبر است" }, 400);
+      const username = String(body.username || "").trim();
+      const text = String(body.text || "").trim();
+      if (!username || !text) return json({ ok: false, error: "پیام نامعتبر است" }, 400);
+
+      this.ctx.storage.sql.exec(
+        "INSERT INTO messages(username, text) VALUES(?, ?)",
+        username,
+        text
+      );
+      return json({ ok: true });
+    }
+
+    return json({ ok: false, error: "Not found" }, 404);
+  }
+}
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+
+    if (["/login", "/register", "/messages"].includes(url.pathname)) {
+      const id = env.CHAT_ROOM.idFromName("chat-dorhami-global");
+      return env.CHAT_ROOM.get(id).fetch(request);
+    }
+
+    return env.ASSETS.fetch(request);
+  },
+};
