@@ -1,0 +1,6 @@
+SAFE BACKUP MARKER
+Project: chat-dorhami
+Golden profile point commit: a8cd99b330be9b8713e14d0fe9381c2e8cad943a
+Backup branch: backup-2026-09-04-profile-golden
+Created: 2026-09-04
+Do not modify this marker; it documents the safe restore point.
