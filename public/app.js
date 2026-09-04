@@ -12,6 +12,7 @@ const messageInput = $('#messageInput');
 let mode = 'login';
 let username = localStorage.getItem('dorhami_user') || '';
 let timer = null;
+let presenceTimer = null;
 
 function setMode(next) {
   mode = next;
@@ -33,11 +34,39 @@ async function api(path, options = {}) {
   return data;
 }
 
+async function updatePresence() {
+  if (!username) return;
+  try {
+    await api('/presence', { method: 'POST', body: JSON.stringify({ username }) });
+    const data = await api('/presence', { method: 'GET', headers: {} });
+    const names = (data.users || []).map(u => u.username);
+    const label = `${data.count || 0} نفر آنلاین`;
+    $('#onlineText').textContent = `${label} · ${username}`;
+    $('#onlineText').title = names.length ? `آنلاین‌ها: ${names.join('، ')}` : 'فعلاً کسی آنلاین نیست';
+    const miniCount = document.querySelector('.mini-count');
+    if (miniCount) miniCount.textContent = `● ${label}`;
+  } catch (error) {
+    // Presence is optional; chat should continue working if it is temporarily unavailable.
+  }
+}
+
+function startPresence() {
+  if (presenceTimer) clearInterval(presenceTimer);
+  updatePresence();
+  presenceTimer = setInterval(updatePresence, 10000);
+}
+
+function stopPresence() {
+  if (presenceTimer) clearInterval(presenceTimer);
+  presenceTimer = null;
+}
+
 function showChat() {
   authView.classList.add('hidden');
   chatView.classList.remove('hidden');
-  $('#onlineText').textContent = `وارد شده با نام ${username}`;
+  $('#onlineText').textContent = `در حال اتصال · ${username}`;
   loadMessages();
+  startPresence();
   if (timer) clearInterval(timer);
   timer = setInterval(loadMessages, 2500);
   messageInput.focus();
@@ -45,6 +74,7 @@ function showChat() {
 
 function showAuth() {
   if (timer) clearInterval(timer);
+  stopPresence();
   chatView.classList.add('hidden');
   authView.classList.remove('hidden');
 }
@@ -110,7 +140,12 @@ messageForm.addEventListener('submit', async (event) => {
   }
 });
 
-$('#logout').addEventListener('click', () => {
+$('#logout').addEventListener('click', async () => {
+  const leavingUser = username;
+  stopPresence();
+  try {
+    await api('/presence', { method: 'DELETE', body: JSON.stringify({ username: leavingUser }) });
+  } catch (error) {}
   localStorage.removeItem('dorhami_user');
   username = '';
   showAuth();
