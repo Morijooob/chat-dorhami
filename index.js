@@ -28,7 +28,8 @@ export class ChatRoom extends DurableObject {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        avatar TEXT NOT NULL DEFAULT '👤'
       );
       CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,6 +60,7 @@ export class ChatRoom extends DurableObject {
       CREATE INDEX IF NOT EXISTS private_messages_recipient_id ON private_messages(recipient, id);
       CREATE INDEX IF NOT EXISTS presence_last_seen ON presence(last_seen);
     `);
+    try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN avatar TEXT NOT NULL DEFAULT '👤'"); } catch (error) {}
   }
 
   async fetch(request) {
@@ -80,20 +82,41 @@ export class ChatRoom extends DurableObject {
         const exists = this.ctx.storage.sql.exec("SELECT id FROM users WHERE username = ? LIMIT 1", username).toArray();
         if (exists.length) return json({ error: "این نام کاربری قبلاً ثبت شده است." }, 409);
         this.ctx.storage.sql.exec("INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)", username, await hashPassword(password), Date.now());
-        return json({ ok: true, username });
+        return json({ ok: true, username, avatar: "👤" });
       }
 
       if (request.method === "POST" && url.pathname === "/login") {
         const body = await request.json();
         const username = String(body.username || "").trim();
         const password = String(body.password || "");
-        const rows = this.ctx.storage.sql.exec("SELECT username, password_hash FROM users WHERE username = ? LIMIT 1", username).toArray();
+        const rows = this.ctx.storage.sql.exec("SELECT username, password_hash, avatar FROM users WHERE username = ? LIMIT 1", username).toArray();
         if (!rows.length || rows[0].password_hash !== await hashPassword(password)) return json({ error: "نام کاربری یا رمز عبور اشتباه است." }, 401);
-        return json({ ok: true, username: rows[0].username });
+        return json({ ok: true, username: rows[0].username, avatar: rows[0].avatar || "👤" });
+      }
+
+      if (request.method === "GET" && url.pathname === "/profile") {
+        const username = String(url.searchParams.get("username") || "").trim();
+        if (!username) return json({ error: "کاربر نامعتبر است." }, 400);
+        const rows = this.ctx.storage.sql.exec("SELECT username, avatar FROM users WHERE username = ? LIMIT 1", username).toArray();
+        if (!rows.length) return json({ error: "کاربر پیدا نشد." }, 404);
+        return json({ ok: true, profile: { username: rows[0].username, avatar: rows[0].avatar || "👤" } });
+      }
+
+      if (request.method === "POST" && url.pathname === "/profile") {
+        const body = await request.json();
+        const username = String(body.username || "").trim();
+        const avatar = String(body.avatar || "").trim();
+        const allowed = new Set(["😀","😎","🥰","🤩","😇","🥳","🤓","😈","👻","🤖","🐱","🐼","🦊","🐸","🐯","🦁","🐵","🐨","🐰","🐙","🦄","🐲","🌙","⭐","🔥"]);
+        if (!username || !allowed.has(avatar)) return json({ error: "آواتار انتخاب‌شده معتبر نیست." }, 400);
+        const result = this.ctx.storage.sql.exec("UPDATE users SET avatar = ? WHERE username = ?", avatar, username);
+        if (!result) return json({ error: "ذخیره آواتار انجام نشد." }, 500);
+        const rows = this.ctx.storage.sql.exec("SELECT username, avatar FROM users WHERE username = ? LIMIT 1", username).toArray();
+        if (!rows.length) return json({ error: "کاربر پیدا نشد." }, 404);
+        return json({ ok: true, profile: { username: rows[0].username, avatar: rows[0].avatar } });
       }
 
       if (request.method === "GET" && url.pathname === "/users") {
-        const rows = this.ctx.storage.sql.exec("SELECT username FROM users ORDER BY username COLLATE NOCASE").toArray();
+        const rows = this.ctx.storage.sql.exec("SELECT username, avatar FROM users ORDER BY username COLLATE NOCASE").toArray();
         return json({ ok: true, users: rows });
       }
 
@@ -141,10 +164,7 @@ export class ChatRoom extends DurableObject {
         const me = String(url.searchParams.get("me") || "").trim();
         const withUser = String(url.searchParams.get("with") || "").trim();
         if (!me || !withUser || me === withUser) return json({ error: "گفتگوی خصوصی نامعتبر است." }, 400);
-        const rows = this.ctx.storage.sql.exec(
-          "SELECT id, sender, recipient, text, created_at FROM private_messages WHERE (sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?) ORDER BY id ASC LIMIT 200",
-          me, withUser, withUser, me
-        ).toArray();
+        const rows = this.ctx.storage.sql.exec("SELECT id, sender, recipient, text, created_at FROM private_messages WHERE (sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?) ORDER BY id ASC LIMIT 200", me, withUser, withUser, me).toArray();
         return json({ ok: true, messages: rows });
       }
 
@@ -165,14 +185,7 @@ export class ChatRoom extends DurableObject {
       if (url.pathname === "/private-unread" && request.method === "GET") {
         const me = String(url.searchParams.get("me") || "").trim();
         if (!me) return json({ error: "کاربر نامعتبر است." }, 400);
-        const rows = this.ctx.storage.sql.exec(`
-          SELECT pm.sender, COUNT(*) AS count, MAX(pm.id) AS latest_id
-          FROM private_messages pm
-          LEFT JOIN private_reads pr ON pr.username = ? AND pr.other_user = pm.sender
-          WHERE pm.recipient = ? AND pm.id > COALESCE(pr.last_read_id, 0)
-          GROUP BY pm.sender
-          ORDER BY latest_id DESC
-        `, me, me).toArray();
+        const rows = this.ctx.storage.sql.exec(`SELECT pm.sender, COUNT(*) AS count, MAX(pm.id) AS latest_id FROM private_messages pm LEFT JOIN private_reads pr ON pr.username = ? AND pr.other_user = pm.sender WHERE pm.recipient = ? AND pm.id > COALESCE(pr.last_read_id, 0) GROUP BY pm.sender ORDER BY latest_id DESC`, me, me).toArray();
         const total = rows.reduce((sum, row) => sum + Number(row.count || 0), 0);
         return json({ ok: true, total, users: rows });
       }
@@ -183,10 +196,7 @@ export class ChatRoom extends DurableObject {
         const otherUser = String(body.otherUser || "").trim();
         const lastReadId = Number(body.lastReadId || 0);
         if (!username || !otherUser || username === otherUser || !Number.isFinite(lastReadId) || lastReadId < 0) return json({ error: "اطلاعات خواندن نامعتبر است." }, 400);
-        this.ctx.storage.sql.exec(`
-          INSERT INTO private_reads (username, other_user, last_read_id) VALUES (?, ?, ?)
-          ON CONFLICT(username, other_user) DO UPDATE SET last_read_id = MAX(last_read_id, excluded.last_read_id)
-        `, username, otherUser, Math.floor(lastReadId));
+        this.ctx.storage.sql.exec(`INSERT INTO private_reads (username, other_user, last_read_id) VALUES (?, ?, ?) ON CONFLICT(username, other_user) DO UPDATE SET last_read_id = MAX(last_read_id, excluded.last_read_id)`, username, otherUser, Math.floor(lastReadId));
         return json({ ok: true });
       }
 
@@ -200,7 +210,7 @@ export class ChatRoom extends DurableObject {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const apiPaths = new Set(["/health", "/register", "/login", "/users", "/presence", "/messages", "/private-messages", "/private-unread", "/private-read"]);
+    const apiPaths = new Set(["/health", "/register", "/login", "/profile", "/users", "/presence", "/messages", "/private-messages", "/private-unread", "/private-read"]);
     if (apiPaths.has(url.pathname)) {
       try {
         const id = env.CHAT_ROOM.idFromName("public-room");
@@ -209,7 +219,6 @@ export default {
         return json({ error: "اتصال سرور برقرار نشد.", detail: String(error?.message || error) }, 500);
       }
     }
-
     try {
       return await env.ASSETS.fetch(request);
     } catch (error) {
