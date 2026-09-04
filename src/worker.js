@@ -4,6 +4,9 @@ const COOKIE = 'dorhami_session';
 const ROOM = 'general';
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_MESSAGE = 2000;
+const MAX_USERNAME = 24;
+const MIN_USERNAME = 3;
+const MIN_PASSWORD = 6;
 
 export default {
   async fetch(request, env) {
@@ -25,33 +28,7 @@ export class Dorhami extends DurableObject {
     this.env = env;
 
     ctx.blockConcurrencyWhile(async () => {
-      ctx.storage.sql.exec(`
-        CREATE TABLE IF NOT EXISTS users (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-          password_hash TEXT NOT NULL,
-          salt TEXT NOT NULL,
-          created_at INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS sessions (
-          token_hash TEXT PRIMARY KEY,
-          user_id INTEGER NOT NULL,
-          expires_at INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id);
-        CREATE TABLE IF NOT EXISTS messages (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          room TEXT NOT NULL,
-          user_id INTEGER NOT NULL,
-          username TEXT NOT NULL,
-          body TEXT NOT NULL,
-          created_at INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS messages_room_id ON messages(room,id);
-      `);
-
-      // Cloudflare's Hibernation API keeps WebSocket clients connected while
-      // the Durable Object can leave memory when idle.
+      this.ensureSchema();
       if (typeof ctx.setWebSocketAutoResponse === 'function') {
         ctx.setWebSocketAutoResponse(
           new WebSocketRequestResponsePair('ping', 'pong')
@@ -60,25 +37,53 @@ export class Dorhami extends DurableObject {
     });
   }
 
+  ensureSchema() {
+    const sql = this.ctx.storage.sql;
+    sql.exec(`CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      password_hash TEXT NOT NULL,
+      salt TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )`);
+    sql.exec(`CREATE TABLE IF NOT EXISTS sessions (
+      token_hash TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    )`);
+    sql.exec('CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id)');
+    sql.exec(`CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      room TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      username TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )`);
+    sql.exec('CREATE INDEX IF NOT EXISTS messages_room_id ON messages(room,id)');
+  }
+
   async fetch(request) {
     const url = new URL(request.url);
 
     try {
       switch (url.pathname) {
         case '/api/health':
-          return json({ ok: true, service: 'dorhami-mon', version: '3' });
+          return this.health();
+        case '/api/diagnostic':
+          return this.diagnostic();
         case '/api/register':
           return request.method === 'POST'
             ? await this.register(request)
-            : json({ error: 'Method not allowed' }, 405);
+            : methodNotAllowed();
         case '/api/login':
           return request.method === 'POST'
             ? await this.login(request)
-            : json({ error: 'Method not allowed' }, 405);
+            : methodNotAllowed();
         case '/api/logout':
           return request.method === 'POST'
             ? await this.logout(request)
-            : json({ error: 'Method not allowed' }, 405);
+            : methodNotAllowed();
         case '/api/me':
           return await this.me(request);
         case '/api/rooms':
@@ -86,12 +91,61 @@ export class Dorhami extends DurableObject {
         case '/ws':
           return await this.websocket(request);
         default:
-          return json({ error: 'Not found' }, 404);
+          return json({ error: 'Not found', code: 'NOT_FOUND' }, 404);
       }
     } catch (error) {
-      console.error('DORHAMI_ERROR', error);
-      return json({ error: 'خطای داخلی سرور', code: 'SERVER_ERROR' }, 500);
+      console.error('DORHAMI_ERROR', error?.stack || error);
+      return json({
+        error: 'خطای داخلی سرور',
+        code: 'SERVER_ERROR',
+        requestId: crypto.randomUUID()
+      }, 500);
     }
+  }
+
+  health() {
+    try {
+      this.ctx.storage.sql.exec('SELECT 1 AS ok').toArray();
+      return json({
+        ok: true,
+        service: 'dorhami-mon',
+        version: '4',
+        storage: 'sqlite',
+        websocket: 'hibernation'
+      });
+    } catch (error) {
+      console.error('DORHAMI_HEALTH', error?.stack || error);
+      return json({ ok: false, version: '4', code: 'STORAGE_UNAVAILABLE' }, 500);
+    }
+  }
+
+  diagnostic() {
+    try {
+      const tables = this.ctx.storage.sql
+        .exec("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        .toArray()
+        .map(row => row.name);
+      const users = this.countRows('users');
+      const sessions = this.countRows('sessions');
+      const messages = this.countRows('messages');
+      return json({
+        ok: true,
+        version: '4',
+        tables,
+        counts: { users, sessions, messages }
+      });
+    } catch (error) {
+      console.error('DORHAMI_DIAGNOSTIC', error?.stack || error);
+      return json({ ok: false, code: 'DIAGNOSTIC_FAILED' }, 500);
+    }
+  }
+
+  countRows(table) {
+    const allowed = new Set(['users', 'sessions', 'messages']);
+    if (!allowed.has(table)) throw new Error('INVALID_TABLE');
+    return this.ctx.storage.sql
+      .exec(`SELECT COUNT(*) AS count FROM ${table}`)
+      .toArray()[0]?.count ?? 0;
   }
 
   async register(request) {
@@ -100,22 +154,21 @@ export class Dorhami extends DurableObject {
     const password = String(data.password ?? '');
 
     if (!/^[\p{L}\p{N}_-]{3,24}$/u.test(name)) {
-      return json({ error: 'نام کاربری باید ۳ تا ۲۴ کاراکتر باشد.' }, 400);
+      return json({ error: 'نام کاربری باید ۳ تا ۲۴ کاراکتر باشد.', code: 'INVALID_USERNAME' }, 400);
     }
-    if (password.length < 6) {
-      return json({ error: 'رمز عبور باید حداقل ۶ کاراکتر باشد.' }, 400);
-    }
-
-    const existing = this.ctx.storage.sql
-      .exec('SELECT id FROM users WHERE username=? LIMIT 1', name)
-      .toArray()[0];
-
-    if (existing) {
-      return json({ error: 'این نام کاربری قبلاً ثبت شده است.' }, 409);
+    if (password.length < MIN_PASSWORD) {
+      return json({ error: 'رمز عبور باید حداقل ۶ کاراکتر باشد.', code: 'INVALID_PASSWORD' }, 400);
     }
 
-    const salt = randomBytes(16);
-    const passwordHash = await derive(password, salt);
+    let salt;
+    let passwordHash;
+    try {
+      salt = randomBytes(16);
+      passwordHash = await derive(password, salt);
+    } catch (error) {
+      console.error('DORHAMI_REGISTER_HASH', error?.stack || error);
+      return json({ error: 'خطا در آماده‌سازی حساب.', code: 'REGISTER_HASH_FAILED' }, 500);
+    }
 
     try {
       this.ctx.storage.sql.exec(
@@ -126,14 +179,14 @@ export class Dorhami extends DurableObject {
         Date.now()
       );
     } catch (error) {
-      // A concurrent registration can win the UNIQUE race.
-      const duplicate = this.ctx.storage.sql
+      const existing = this.ctx.storage.sql
         .exec('SELECT id FROM users WHERE username=? LIMIT 1', name)
         .toArray()[0];
-      if (duplicate) {
-        return json({ error: 'این نام کاربری قبلاً ثبت شده است.' }, 409);
+      if (existing) {
+        return json({ error: 'این نام کاربری قبلاً ثبت شده است.', code: 'USERNAME_TAKEN' }, 409);
       }
-      throw error;
+      console.error('DORHAMI_REGISTER_INSERT', error?.stack || error);
+      return json({ error: 'ثبت حساب انجام نشد.', code: 'REGISTER_DB_INSERT_FAILED' }, 500);
     }
 
     const user = this.ctx.storage.sql
@@ -141,14 +194,19 @@ export class Dorhami extends DurableObject {
       .toArray()[0];
 
     if (!user) {
-      throw new Error('USER_CREATE_FAILED');
+      console.error('DORHAMI_REGISTER_VERIFY', name);
+      return json({ error: 'حساب ساخته نشد.', code: 'REGISTER_VERIFY_FAILED' }, 500);
     }
 
-    const token = await this.createSession(user.id);
-    return withCookie(
-      json({ ok: true, user }),
-      token
-    );
+    let token;
+    try {
+      token = await this.createSession(user.id);
+    } catch (error) {
+      console.error('DORHAMI_REGISTER_SESSION', error?.stack || error);
+      return json({ error: 'حساب ساخته شد اما ورود خودکار انجام نشد.', code: 'REGISTER_SESSION_FAILED' }, 500);
+    }
+
+    return withCookie(json({ ok: true, user }), token);
   }
 
   async login(request) {
@@ -157,7 +215,7 @@ export class Dorhami extends DurableObject {
     const password = String(data.password ?? '');
 
     if (!name || !password) {
-      return json({ error: 'نام کاربری و رمز عبور را وارد کن.' }, 400);
+      return json({ error: 'نام کاربری و رمز عبور را وارد کن.', code: 'MISSING_CREDENTIALS' }, 400);
     }
 
     const user = this.ctx.storage.sql
@@ -168,32 +226,42 @@ export class Dorhami extends DurableObject {
       .toArray()[0];
 
     if (!user) {
-      return json({ error: 'نام کاربری یا رمز عبور اشتباه است.' }, 401);
+      return json({ error: 'نام کاربری یا رمز عبور اشتباه است.', code: 'INVALID_CREDENTIALS' }, 401);
     }
 
-    const passwordHash = await derive(password, fromB64(user.salt));
+    let passwordHash;
+    try {
+      passwordHash = await derive(password, fromB64(user.salt));
+    } catch (error) {
+      console.error('DORHAMI_LOGIN_HASH', error?.stack || error);
+      return json({ error: 'خطا در بررسی رمز عبور.', code: 'LOGIN_HASH_FAILED' }, 500);
+    }
+
     if (!safeEqual(user.password_hash, passwordHash)) {
-      return json({ error: 'نام کاربری یا رمز عبور اشتباه است.' }, 401);
+      return json({ error: 'نام کاربری یا رمز عبور اشتباه است.', code: 'INVALID_CREDENTIALS' }, 401);
     }
 
-    const token = await this.createSession(user.id);
-    return withCookie(
-      json({ ok: true, user: { id: user.id, username: user.username } }),
-      token
-    );
+    try {
+      const token = await this.createSession(user.id);
+      return withCookie(
+        json({ ok: true, user: { id: user.id, username: user.username } }),
+        token
+      );
+    } catch (error) {
+      console.error('DORHAMI_LOGIN_SESSION', error?.stack || error);
+      return json({ error: 'ورود انجام نشد.', code: 'LOGIN_SESSION_FAILED' }, 500);
+    }
   }
 
   async createSession(userId) {
     const token = b64(randomBytes(32));
     const tokenHash = await sha256(token);
-
     this.ctx.storage.sql.exec(
       'INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)',
       tokenHash,
       userId,
       Date.now() + SESSION_MS
     );
-
     return token;
   }
 
@@ -217,8 +285,13 @@ export class Dorhami extends DurableObject {
   }
 
   async me(request) {
-    const user = await this.auth(request);
-    return json({ authenticated: Boolean(user), user });
+    try {
+      const user = await this.auth(request);
+      return json({ authenticated: Boolean(user), user });
+    } catch (error) {
+      console.error('DORHAMI_ME', error?.stack || error);
+      return json({ error: 'خطا در بررسی نشست.', code: 'SESSION_CHECK_FAILED' }, 500);
+    }
   }
 
   async logout(request) {
@@ -232,64 +305,42 @@ export class Dorhami extends DurableObject {
 
     const response = json({ ok: true });
     const headers = new Headers(response.headers);
-    headers.set(
-      'Set-Cookie',
-      `${COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`
-    );
-    return new Response(response.body, {
-      status: response.status,
-      headers
-    });
+    headers.set('Set-Cookie', clearCookie());
+    return new Response(response.body, { status: response.status, headers });
   }
 
   async rooms(request) {
     const user = await this.auth(request);
-    if (!user) return json({ error: 'ابتدا وارد حساب شو.' }, 401);
+    if (!user) return json({ error: 'ابتدا وارد حساب شو.', code: 'AUTH_REQUIRED' }, 401);
 
-    const messages = this.readHistory();
     return json({
       rooms: [{
         id: ROOM,
         name: 'دورهمی عمومی',
         online: this.connectedUsers().length
       }],
-      messages
+      messages: this.readHistory()
     });
   }
 
   async websocket(request) {
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
-      return json({ error: 'WebSocket required' }, 426);
+      return json({ error: 'WebSocket required', code: 'WEBSOCKET_REQUIRED' }, 426);
     }
 
     const user = await this.auth(request);
-    if (!user) return json({ error: 'ابتدا وارد حساب شو.' }, 401);
+    if (!user) return json({ error: 'ابتدا وارد حساب شو.', code: 'AUTH_REQUIRED' }, 401);
 
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
 
-    // IMPORTANT: use the Hibernation API, not server.accept().
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({
-      userId: user.id,
-      username: user.username,
-      room: ROOM
-    });
-
-    server.send(JSON.stringify({
-      type: 'ready',
-      user,
-      room: ROOM,
-      messages: this.readHistory()
-    }));
-
+    server.serializeAttachment({ userId: user.id, username: user.username, room: ROOM });
+    server.send(JSON.stringify({ type: 'ready', user, room: ROOM, messages: this.readHistory() }));
     this.broadcastPresence();
 
-    return new Response(null, {
-      status: 101,
-      webSocket: client
-    });
+    return new Response(null, { status: 101, webSocket: client });
   }
 
   async webSocketMessage(ws, message) {
@@ -301,51 +352,38 @@ export class Dorhami extends DurableObject {
         return;
       }
 
-      const data = typeof message === 'string'
-        ? safeJsonParse(message)
-        : null;
-
+      const data = typeof message === 'string' ? safeJsonParse(message) : null;
       if (!data) return;
 
       if (data.type === 'history') {
-        ws.send(JSON.stringify({
-          type: 'history',
-          messages: this.readHistory()
-        }));
+        ws.send(JSON.stringify({ type: 'history', messages: this.readHistory() }));
         return;
       }
-
       if (data.type === 'message') {
         await this.sendMessage(user, data.body);
         return;
       }
-
       if (data.type === 'ping') {
         ws.send(JSON.stringify({ type: 'pong' }));
       }
     } catch (error) {
-      console.error('DORHAMI_WS_MESSAGE', error);
+      console.error('DORHAMI_WS_MESSAGE', error?.stack || error);
     }
   }
 
   webSocketClose(ws, code, reason) {
-    try {
-      ws.close(code, reason);
-    } catch {}
+    try { ws.close(code, reason); } catch {}
     this.broadcastPresence();
   }
 
   webSocketError(ws, error) {
-    console.error('DORHAMI_WS_ERROR', error);
+    console.error('DORHAMI_WS_ERROR', error?.stack || error);
     this.broadcastPresence();
   }
 
   userFromConnection(connection) {
     if (!connection?.userId || !connection?.username) return null;
-    return {
-      id: connection.userId,
-      username: connection.username
-    };
+    return { id: connection.userId, username: connection.username };
   }
 
   readHistory() {
@@ -387,9 +425,7 @@ export class Dorhami extends DurableObject {
       )
       .toArray()[0];
 
-    if (message) {
-      this.broadcast({ type: 'message', message });
-    }
+    if (message) this.broadcast({ type: 'message', message });
   }
 
   broadcast(data) {
@@ -398,7 +434,7 @@ export class Dorhami extends DurableObject {
       try {
         if (ws.readyState === WebSocket.OPEN) ws.send(text);
       } catch (error) {
-        console.error('DORHAMI_BROADCAST', error);
+        console.error('DORHAMI_BROADCAST', error?.stack || error);
       }
     }
   }
@@ -407,8 +443,7 @@ export class Dorhami extends DurableObject {
     const users = [];
     for (const ws of this.ctx.getWebSockets()) {
       try {
-        const attachment = ws.deserializeAttachment();
-        const user = this.userFromConnection(attachment);
+        const user = this.userFromConnection(ws.deserializeAttachment());
         if (user) users.push(user);
       } catch {}
     }
@@ -417,15 +452,11 @@ export class Dorhami extends DurableObject {
 
   broadcastPresence() {
     const users = this.connectedUsers();
-    this.broadcast({
-      type: 'presence',
-      count: users.length,
-      users
-    });
+    this.broadcast({ type: 'presence', count: users.length, users });
   }
 }
 
-// Keep the legacy export because the existing Cloudflare namespace depends on it.
+// Keep the legacy export: the existing Cloudflare Durable Object namespace depends on it.
 export class ChatRoom extends Dorhami {}
 
 function cleanName(value) {
@@ -440,6 +471,10 @@ function json(data, status = 200) {
       'Cache-Control': 'no-store'
     }
   });
+}
+
+function methodNotAllowed() {
+  return json({ error: 'Method not allowed', code: 'METHOD_NOT_ALLOWED' }, 405);
 }
 
 async function readJson(request) {
@@ -497,12 +532,7 @@ async function derive(password, salt) {
   );
 
   const bits = await crypto.subtle.deriveBits(
-    {
-      name: 'PBKDF2',
-      salt,
-      iterations: 120000,
-      hash: 'SHA-256'
-    },
+    { name: 'PBKDF2', salt, iterations: 120000, hash: 'SHA-256' },
     key,
     256
   );
@@ -514,7 +544,6 @@ function safeEqual(left, right) {
   const a = String(left);
   const b = String(right);
   if (a.length !== b.length) return false;
-
   let difference = 0;
   for (let i = 0; i < a.length; i++) {
     difference |= a.charCodeAt(i) ^ b.charCodeAt(i);
@@ -524,22 +553,13 @@ function safeEqual(left, right) {
 
 function getCookie(request, name) {
   const header = request.headers.get('Cookie') || '';
-  const parts = header.split(';');
-
-  for (const part of parts) {
+  for (const part of header.split(';')) {
     const index = part.indexOf('=');
     if (index < 0) continue;
     const key = part.slice(0, index).trim();
     if (key !== name) continue;
-
-    const value = part.slice(index + 1).trim();
-    try {
-      return decodeURIComponent(value);
-    } catch {
-      return null;
-    }
+    return decodeURIComponent(part.slice(index + 1).trim());
   }
-
   return null;
 }
 
@@ -547,11 +567,11 @@ function withCookie(response, token) {
   const headers = new Headers(response.headers);
   headers.set(
     'Set-Cookie',
-    `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${Math.floor(SESSION_MS / 1000)}`
+    `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_MS / 1000}`
   );
+  return new Response(response.body, { status: response.status, headers });
+}
 
-  return new Response(response.body, {
-    status: response.status,
-    headers
-  });
+function clearCookie() {
+  return `${COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
 }
