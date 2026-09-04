@@ -13,14 +13,12 @@
     ]
   },
 
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": [
-        "ChatRoom"
-      ]
+  "exports": {
+    "ChatRoom": {
+      "type": "durable-object",
+      "storage": "sqlite"
     }
-  ],
+  },
 
   "assets": {
     "directory": "./public"
