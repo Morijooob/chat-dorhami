@@ -21,9 +21,16 @@ function handle(d){
   if(d.type==='private_history'){if(privateUser&&Number(d.user?.id)===Number(privateUser.id))renderHistory(d.messages||[]);return;}
   if(d.type==='private_message'){
     const fromId=Number(d.from?.id);
+    const toId=Number(d.to?.id);
     const myId=Number(me?.id);
-    const targetId=Number(privateUser?.id);
-    if(privateUser&&(fromId===targetId||fromId===myId))addMessage(d.message);
+    const privateId=Number(privateUser?.id);
+    const messageUserId=Number(d.message?.user_id);
+    const belongsToCurrentPrivateChat=privateUser&&(
+      fromId===privateId||
+      toId===privateId||
+      messageUserId===myId
+    );
+    if(belongsToCurrentPrivateChat)addMessage(d.message);
     else if(!privateUser)toast(`پیام خصوصی جدید از ${d.from?.username||'کاربر'}`);
     return;
   }
