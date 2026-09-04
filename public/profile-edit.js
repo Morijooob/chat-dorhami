@@ -1,7 +1,6 @@
 (() => {
   const KEY = 'dorhami_profile_bio';
   const getBio = () => String(localStorage.getItem(KEY) || '').trim();
-  const escapeHtml = value => String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));
 
   const style = document.createElement('style');
   style.textContent = `
@@ -46,8 +45,10 @@
       (actions || profile.querySelector('.profile-private-btn') || profile.querySelector('.profile-hint'))?.before(bio);
     }
     const value = name === me ? getBio() : '';
-    bio.textContent = value || (name === me ? 'هنوز معرفی کوتاهی ننوشتی ✨' : '');
-    bio.classList.toggle('empty', !value);
+    const display = value || (name === me ? 'هنوز معرفی کوتاهی ننوشتی ✨' : '');
+    if (bio.textContent !== display) bio.textContent = display;
+    const shouldBeEmpty = !value;
+    if (bio.classList.contains('empty') !== shouldBeEmpty) bio.classList.toggle('empty', shouldBeEmpty);
     let edit = profile.querySelector('.profile-edit-btn');
     if (name === me) {
       if (!edit) {
