@@ -43,6 +43,12 @@ export class ChatRoom extends DurableObject {
         text TEXT NOT NULL,
         created_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS private_reads (
+        username TEXT NOT NULL,
+        other_user TEXT NOT NULL,
+        last_read_id INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (username, other_user)
+      );
       CREATE TABLE IF NOT EXISTS presence (
         username TEXT PRIMARY KEY,
         last_seen INTEGER NOT NULL
@@ -50,6 +56,7 @@ export class ChatRoom extends DurableObject {
       CREATE INDEX IF NOT EXISTS messages_created_at ON messages(created_at);
       CREATE INDEX IF NOT EXISTS private_messages_pair ON private_messages(sender, recipient, id);
       CREATE INDEX IF NOT EXISTS private_messages_created_at ON private_messages(created_at);
+      CREATE INDEX IF NOT EXISTS private_messages_recipient_id ON private_messages(recipient, id);
       CREATE INDEX IF NOT EXISTS presence_last_seen ON presence(last_seen);
     `);
   }
@@ -155,6 +162,34 @@ export class ChatRoom extends DurableObject {
         return json({ ok: true, message: row });
       }
 
+      if (url.pathname === "/private-unread" && request.method === "GET") {
+        const me = String(url.searchParams.get("me") || "").trim();
+        if (!me) return json({ error: "کاربر نامعتبر است." }, 400);
+        const rows = this.ctx.storage.sql.exec(`
+          SELECT pm.sender, COUNT(*) AS count, MAX(pm.id) AS latest_id
+          FROM private_messages pm
+          LEFT JOIN private_reads pr ON pr.username = ? AND pr.other_user = pm.sender
+          WHERE pm.recipient = ? AND pm.id > COALESCE(pr.last_read_id, 0)
+          GROUP BY pm.sender
+          ORDER BY latest_id DESC
+        `, me, me).toArray();
+        const total = rows.reduce((sum, row) => sum + Number(row.count || 0), 0);
+        return json({ ok: true, total, users: rows });
+      }
+
+      if (url.pathname === "/private-read" && request.method === "POST") {
+        const body = await request.json();
+        const username = String(body.username || "").trim();
+        const otherUser = String(body.otherUser || "").trim();
+        const lastReadId = Number(body.lastReadId || 0);
+        if (!username || !otherUser || username === otherUser || !Number.isFinite(lastReadId) || lastReadId < 0) return json({ error: "اطلاعات خواندن نامعتبر است." }, 400);
+        this.ctx.storage.sql.exec(`
+          INSERT INTO private_reads (username, other_user, last_read_id) VALUES (?, ?, ?)
+          ON CONFLICT(username, other_user) DO UPDATE SET last_read_id = MAX(last_read_id, excluded.last_read_id)
+        `, username, otherUser, Math.floor(lastReadId));
+        return json({ ok: true });
+      }
+
       return json({ error: "مسیر پیدا نشد." }, 404);
     } catch (error) {
       return json({ error: "خطای داخلی سرور", detail: String(error?.message || error) }, 500);
@@ -165,7 +200,7 @@ export class ChatRoom extends DurableObject {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const apiPaths = new Set(["/health", "/register", "/login", "/users", "/presence", "/messages", "/private-messages"]);
+    const apiPaths = new Set(["/health", "/register", "/login", "/users", "/presence", "/messages", "/private-messages", "/private-unread", "/private-read"]);
     if (apiPaths.has(url.pathname)) {
       try {
         const id = env.CHAT_ROOM.idFromName("public-room");

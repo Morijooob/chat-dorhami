@@ -13,7 +13,9 @@ let mode = 'login';
 let username = localStorage.getItem('dorhami_user') || '';
 let timer = null;
 let presenceTimer = null;
+let unreadTimer = null;
 let currentPrivateUser = '';
+let unreadByUser = {};
 
 function setMode(next) {
   mode = next;
@@ -94,6 +96,42 @@ function stopPresence() {
   presenceTimer = null;
 }
 
+function updateUnreadBadge() {
+  const total = Object.values(unreadByUser).reduce((sum, count) => sum + count, 0);
+  const badge = $('#privateUnreadBadge');
+  if (badge) {
+    badge.textContent = total > 99 ? '99+' : String(total);
+    badge.classList.toggle('hidden', total === 0);
+  }
+  document.title = total ? `(${total > 99 ? '99+' : total}) چت دورهمی` : 'چت دورهمی | گپ دوستانه';
+}
+
+async function checkPrivateUnread() {
+  if (!username) return;
+  try {
+    const data = await api(`/private-unread?me=${encodeURIComponent(username)}`, { method: 'GET', headers: {} });
+    unreadByUser = {};
+    (data.users || []).forEach(item => { unreadByUser[item.sender] = Number(item.count || 0); });
+    if (currentPrivateUser) delete unreadByUser[currentPrivateUser];
+    updateUnreadBadge();
+    const panel = $('#userPanel');
+    if (panel && !panel.classList.contains('hidden')) renderUserListSearch();
+  } catch (error) {}
+}
+
+function startUnreadPolling() {
+  if (unreadTimer) clearInterval(unreadTimer);
+  checkPrivateUnread();
+  unreadTimer = setInterval(checkPrivateUnread, 2500);
+}
+
+function stopUnreadPolling() {
+  if (unreadTimer) clearInterval(unreadTimer);
+  unreadTimer = null;
+  unreadByUser = {};
+  updateUnreadBadge();
+}
+
 function showChat() {
   authView.classList.add('hidden');
   chatView.classList.remove('hidden');
@@ -103,6 +141,7 @@ function showChat() {
   currentPrivateUser = '';
   showPublicChat();
   startPresence();
+  startUnreadPolling();
   if (timer) clearInterval(timer);
   timer = setInterval(loadCurrentConversation, 2500);
   messageInput.focus();
@@ -111,6 +150,7 @@ function showChat() {
 function showAuth() {
   if (timer) clearInterval(timer);
   stopPresence();
+  stopUnreadPolling();
   closeProfile();
   chatView.classList.add('hidden');
   authView.classList.remove('hidden');
@@ -122,6 +162,7 @@ function showPublicChat() {
   $('#roomName').textContent = 'اتاق عمومی دورهمی';
   messageInput.placeholder = 'پیامت رو بنویس...';
   loadMessages();
+  checkPrivateUnread();
 }
 
 function renderMessages(list) {
@@ -166,10 +207,24 @@ async function loadPrivateMessages() {
   if (!currentPrivateUser) return;
   try {
     const data = await api(`/private-messages?me=${encodeURIComponent(username)}&with=${encodeURIComponent(currentPrivateUser)}`, { method: 'GET', headers: {} });
-    if (currentPrivateUser) renderPrivateMessages(data.messages || []);
+    if (currentPrivateUser) {
+      const messages = data.messages || [];
+      renderPrivateMessages(messages);
+      const last = messages[messages.length - 1];
+      if (last) await markPrivateRead(currentPrivateUser, last.id);
+    }
   } catch (error) {
     $('#onlineText').textContent = error.message;
   }
+}
+
+async function markPrivateRead(otherUser, lastReadId) {
+  if (!otherUser || !lastReadId) return;
+  try {
+    await api('/private-read', { method: 'POST', body: JSON.stringify({ username, otherUser, lastReadId }) });
+    delete unreadByUser[otherUser];
+    updateUnreadBadge();
+  } catch (error) {}
 }
 
 async function loadCurrentConversation() {
@@ -181,6 +236,8 @@ async function openPrivateChat(otherUser) {
   const clean = String(otherUser || '').trim();
   if (!clean || clean === username) return;
   currentPrivateUser = clean;
+  delete unreadByUser[clean];
+  updateUnreadBadge();
   $('#userPanel').classList.add('hidden');
   $('#privateBar').classList.remove('hidden');
   $('#privateWith').textContent = clean;
@@ -191,18 +248,34 @@ async function openPrivateChat(otherUser) {
   messageInput.focus();
 }
 
+function renderUserListSearch() {
+  const list = $('#userList');
+  const query = String($('#userSearch')?.value || '').trim().toLocaleLowerCase();
+  const users = window.dorhamiUsers || [];
+  const filtered = users.filter(name => name.toLocaleLowerCase().includes(query));
+  if (!filtered.length) {
+    list.innerHTML = '<div class="user-loading">کاربری با این نام پیدا نشد.</div>';
+    return;
+  }
+  list.innerHTML = filtered.map(name => {
+    const count = Number(unreadByUser[name] || 0);
+    const badge = count ? `<span class="unread-count">${count > 99 ? '99+' : count}</span>` : '';
+    return `<button class="user-item" type="button" data-user="${escapeHtml(name)}"><span class="avatar">${escapeHtml(avatarFor(name))}</span><span class="user-item-text"><b>${escapeHtml(name)}</b><small>شروع پیام خصوصی</small></span>${badge}</button>`;
+  }).join('');
+  list.querySelectorAll('.user-item').forEach(button => button.addEventListener('click', () => openPrivateChat(button.dataset.user)));
+}
+
 async function loadUsers() {
   const list = $('#userList');
   list.innerHTML = '<div class="user-loading">در حال دریافت کاربران…</div>';
   try {
     const data = await api('/users', { method: 'GET', headers: {} });
-    const users = (data.users || []).map(u => u.username).filter(name => name !== username);
-    if (!users.length) {
+    window.dorhamiUsers = (data.users || []).map(u => u.username).filter(name => name !== username);
+    if (!window.dorhamiUsers.length) {
       list.innerHTML = '<div class="user-loading">کاربر دیگری برای گفتگوی خصوصی نیست.</div>';
       return;
     }
-    list.innerHTML = users.map(name => `<button class="user-item" type="button" data-user="${escapeHtml(name)}"><span class="avatar">${escapeHtml(avatarFor(name))}</span><span><b>${escapeHtml(name)}</b><small>شروع پیام خصوصی</small></span></button>`).join('');
-    list.querySelectorAll('.user-item').forEach(button => button.addEventListener('click', () => openPrivateChat(button.dataset.user)));
+    renderUserListSearch();
   } catch (error) {
     list.innerHTML = `<div class="user-loading">${escapeHtml(error.message)}</div>`;
   }
@@ -212,7 +285,11 @@ function toggleUserPanel() {
   const panel = $('#userPanel');
   const willOpen = panel.classList.contains('hidden');
   panel.classList.toggle('hidden');
-  if (willOpen) loadUsers();
+  if (willOpen) {
+    loadUsers();
+    checkPrivateUnread();
+    setTimeout(() => $('#userSearch')?.focus(), 50);
+  }
 }
 
 authForm.addEventListener('submit', async (event) => {
@@ -258,11 +335,13 @@ messageForm.addEventListener('submit', async (event) => {
 
 $('#usersTrigger').addEventListener('click', toggleUserPanel);
 $('#userPanelClose').addEventListener('click', () => $('#userPanel').classList.add('hidden'));
+$('#userSearch')?.addEventListener('input', renderUserListSearch);
 $('#backPublic').addEventListener('click', showPublicChat);
 
 $('#logout').addEventListener('click', async () => {
   const leavingUser = username;
   stopPresence();
+  stopUnreadPolling();
   try {
     await api('/presence', { method: 'DELETE', body: JSON.stringify({ username: leavingUser }) });
   } catch (error) {}
