@@ -1,357 +1,41 @@
-const $ = (s) => document.querySelector(s);
-const authView = $('#authView');
-const chatView = $('#chatView');
-const authForm = $('#authForm');
-const authStatus = $('#authStatus');
-const authText = $('#authText');
-const usernameInput = $('#username');
-const passwordInput = $('#password');
-const messagesEl = $('#messages');
-const messageForm = $('#messageForm');
-const messageInput = $('#messageInput');
-let mode = 'login';
-let username = localStorage.getItem('dorhami_user') || '';
-let timer = null;
-let presenceTimer = null;
-let unreadTimer = null;
-let currentPrivateUser = '';
-let unreadByUser = {};
-
-function setMode(next) {
-  mode = next;
-  document.querySelectorAll('.tab').forEach(btn => btn.classList.toggle('active', btn.dataset.mode === next));
-  authText.textContent = next === 'login' ? 'وارد شدن' : 'ساخت حساب';
-  passwordInput.autocomplete = next === 'login' ? 'current-password' : 'new-password';
-  authStatus.textContent = '';
-}
-
-document.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => setMode(btn.dataset.mode)));
-
-async function api(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: { 'content-type': 'application/json', ...(options.headers || {}) }
-  });
-  const data = await response.json().catch(() => ({ error: 'پاسخ نامعتبر از سرور' }));
-  if (!response.ok) throw new Error(data.error || 'خطایی رخ داد');
-  return data;
-}
-
-function avatarFor(name) {
-  const clean = String(name || '').trim();
-  return clean ? clean.charAt(0).toUpperCase() : '👤';
-}
-
-function escapeHtml(value) {
-  return String(value).replace(/[&<>'"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[c]));
-}
-
-function openProfile(name) {
-  const profile = $('#profilePopover');
-  if (!profile) return;
-  const clean = String(name || '').trim();
-  $('#profileAvatar').textContent = avatarFor(clean);
-  $('#profileUsername').textContent = clean || 'کاربر';
-  $('#profileStatus').textContent = clean === username ? 'پروفایل من' : 'عضو دورهمی';
-  profile.classList.remove('hidden');
-}
-
-function closeProfile() {
-  const profile = $('#profilePopover');
-  if (profile) profile.classList.add('hidden');
-}
-
-function setupProfileEvents() {
-  $('#myProfile')?.addEventListener('click', () => openProfile(username));
-  $('#profileClose')?.addEventListener('click', closeProfile);
-  document.addEventListener('click', (event) => {
-    const profile = $('#profilePopover');
-    if (!profile || profile.classList.contains('hidden')) return;
-    if (!profile.contains(event.target) && !$('#myProfile')?.contains(event.target)) closeProfile();
-  });
-}
-
-async function updatePresence() {
-  if (!username) return;
-  try {
-    await api('/presence', { method: 'POST', body: JSON.stringify({ username }) });
-    const data = await api('/presence', { method: 'GET', headers: {} });
-    const names = (data.users || []).map(u => u.username);
-    const label = `${data.count || 0} نفر آنلاین`;
-    $('#onlineText').textContent = `${label} · ${username}`;
-    $('#onlineText').title = names.length ? `آنلاین‌ها: ${names.join('، ')}` : 'فعلاً کسی آنلاین نیست';
-    const miniCount = document.querySelector('.mini-count');
-    if (miniCount) miniCount.textContent = `● ${label}`;
-  } catch (error) {}
-}
-
-function startPresence() {
-  if (presenceTimer) clearInterval(presenceTimer);
-  updatePresence();
-  presenceTimer = setInterval(updatePresence, 10000);
-}
-
-function stopPresence() {
-  if (presenceTimer) clearInterval(presenceTimer);
-  presenceTimer = null;
-}
-
-function updateUnreadBadge() {
-  const total = Object.values(unreadByUser).reduce((sum, count) => sum + count, 0);
-  const badge = $('#privateUnreadBadge');
-  if (badge) {
-    badge.textContent = total > 99 ? '99+' : String(total);
-    badge.classList.toggle('hidden', total === 0);
-  }
-  document.title = total ? `(${total > 99 ? '99+' : total}) چت دورهمی` : 'چت دورهمی | گپ دوستانه';
-}
-
-async function checkPrivateUnread() {
-  if (!username) return;
-  try {
-    const data = await api(`/private-unread?me=${encodeURIComponent(username)}`, { method: 'GET', headers: {} });
-    unreadByUser = {};
-    (data.users || []).forEach(item => { unreadByUser[item.sender] = Number(item.count || 0); });
-    if (currentPrivateUser) delete unreadByUser[currentPrivateUser];
-    updateUnreadBadge();
-    const panel = $('#userPanel');
-    if (panel && !panel.classList.contains('hidden')) renderUserListSearch();
-  } catch (error) {}
-}
-
-function startUnreadPolling() {
-  if (unreadTimer) clearInterval(unreadTimer);
-  checkPrivateUnread();
-  unreadTimer = setInterval(checkPrivateUnread, 2500);
-}
-
-function stopUnreadPolling() {
-  if (unreadTimer) clearInterval(unreadTimer);
-  unreadTimer = null;
-  unreadByUser = {};
-  updateUnreadBadge();
-}
-
-function showChat() {
-  authView.classList.add('hidden');
-  chatView.classList.remove('hidden');
-  $('#onlineText').textContent = `در حال اتصال · ${username}`;
-  $('#myAvatar').textContent = avatarFor(username);
-  $('#myProfileName').textContent = username;
-  currentPrivateUser = '';
-  showPublicChat();
-  startPresence();
-  startUnreadPolling();
-  if (timer) clearInterval(timer);
-  timer = setInterval(loadCurrentConversation, 2500);
-  messageInput.focus();
-}
-
-function showAuth() {
-  if (timer) clearInterval(timer);
-  stopPresence();
-  stopUnreadPolling();
-  closeProfile();
-  chatView.classList.add('hidden');
-  authView.classList.remove('hidden');
-}
-
-function showPublicChat() {
-  currentPrivateUser = '';
-  $('#privateBar').classList.add('hidden');
-  $('#roomName').textContent = 'اتاق عمومی دورهمی';
-  messageInput.placeholder = 'پیامت رو بنویس...';
-  loadMessages();
-  checkPrivateUnread();
-}
-
-function renderMessages(list) {
-  if (!list.length) {
-    messagesEl.innerHTML = '<div class="welcome"><b>به دورهمی خوش اومدی 🌙</b><span>اولین پیام رو تو بفرست!</span></div>';
-    return;
-  }
-  messagesEl.innerHTML = list.map(m => {
-    const mine = m.username === username ? ' mine' : '';
-    const time = new Date(m.created_at).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
-    return `<article class="message${mine}" data-username="${escapeHtml(m.username)}"><button class="message-user" type="button"><span class="message-avatar avatar">${escapeHtml(avatarFor(m.username))}</span><span class="meta">${escapeHtml(m.username)} · ${time}</span></button><div class="body">${escapeHtml(m.text)}</div></article>`;
-  }).join('');
-  messagesEl.querySelectorAll('.message-user').forEach(button => {
-    button.addEventListener('click', () => openProfile(button.closest('.message')?.dataset.username || ''));
-  });
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-}
-
-function renderPrivateMessages(list) {
-  if (!list.length) {
-    messagesEl.innerHTML = '<div class="welcome"><b>گفتگوی خصوصی 🌙</b><span>اولین پیام را بفرست!</span></div>';
-    return;
-  }
-  messagesEl.innerHTML = list.map(m => {
-    const mine = m.sender === username ? ' mine' : '';
-    const time = new Date(m.created_at).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
-    return `<article class="message${mine}" data-username="${escapeHtml(m.sender)}"><button class="message-user" type="button"><span class="message-avatar avatar">${escapeHtml(avatarFor(m.sender))}</span><span class="meta">${escapeHtml(m.sender)} · ${time}</span></button><div class="body">${escapeHtml(m.text)}</div></article>`;
-  }).join('');
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-}
-
-async function loadMessages() {
-  try {
-    const data = await api('/messages', { method: 'GET', headers: {} });
-    if (!currentPrivateUser) renderMessages(data.messages || []);
-  } catch (error) {
-    $('#onlineText').textContent = 'اتصال دوباره در حال تلاش است…';
-  }
-}
-
-async function loadPrivateMessages() {
-  if (!currentPrivateUser) return;
-  try {
-    const data = await api(`/private-messages?me=${encodeURIComponent(username)}&with=${encodeURIComponent(currentPrivateUser)}`, { method: 'GET', headers: {} });
-    if (currentPrivateUser) {
-      const messages = data.messages || [];
-      renderPrivateMessages(messages);
-      const last = messages[messages.length - 1];
-      if (last) await markPrivateRead(currentPrivateUser, last.id);
-    }
-  } catch (error) {
-    $('#onlineText').textContent = error.message;
-  }
-}
-
-async function markPrivateRead(otherUser, lastReadId) {
-  if (!otherUser || !lastReadId) return;
-  try {
-    await api('/private-read', { method: 'POST', body: JSON.stringify({ username, otherUser, lastReadId }) });
-    delete unreadByUser[otherUser];
-    updateUnreadBadge();
-  } catch (error) {}
-}
-
-async function loadCurrentConversation() {
-  if (currentPrivateUser) await loadPrivateMessages();
-  else await loadMessages();
-}
-
-async function openPrivateChat(otherUser) {
-  const clean = String(otherUser || '').trim();
-  if (!clean || clean === username) return;
-  currentPrivateUser = clean;
-  delete unreadByUser[clean];
-  updateUnreadBadge();
-  $('#userPanel').classList.add('hidden');
-  $('#privateBar').classList.remove('hidden');
-  $('#privateWith').textContent = clean;
-  $('#roomName').textContent = `گفتگوی خصوصی با ${clean}`;
-  $('#onlineText').textContent = 'گفتگوی خصوصی';
-  messageInput.placeholder = `پیام برای ${clean}...`;
-  await loadPrivateMessages();
-  messageInput.focus();
-}
-
-function renderUserListSearch() {
-  const list = $('#userList');
-  const query = String($('#userSearch')?.value || '').trim().toLocaleLowerCase();
-  const users = window.dorhamiUsers || [];
-  const filtered = users.filter(name => name.toLocaleLowerCase().includes(query));
-  if (!filtered.length) {
-    list.innerHTML = '<div class="user-loading">کاربری با این نام پیدا نشد.</div>';
-    return;
-  }
-  list.innerHTML = filtered.map(name => {
-    const count = Number(unreadByUser[name] || 0);
-    const badge = count ? `<span class="unread-count">${count > 99 ? '99+' : count}</span>` : '';
-    return `<button class="user-item" type="button" data-user="${escapeHtml(name)}"><span class="avatar">${escapeHtml(avatarFor(name))}</span><span class="user-item-text"><b>${escapeHtml(name)}</b><small>شروع پیام خصوصی</small></span>${badge}</button>`;
-  }).join('');
-  list.querySelectorAll('.user-item').forEach(button => button.addEventListener('click', () => openPrivateChat(button.dataset.user)));
-}
-
-async function loadUsers() {
-  const list = $('#userList');
-  list.innerHTML = '<div class="user-loading">در حال دریافت کاربران…</div>';
-  try {
-    const data = await api('/users', { method: 'GET', headers: {} });
-    window.dorhamiUsers = (data.users || []).map(u => u.username).filter(name => name !== username);
-    if (!window.dorhamiUsers.length) {
-      list.innerHTML = '<div class="user-loading">کاربر دیگری برای گفتگوی خصوصی نیست.</div>';
-      return;
-    }
-    renderUserListSearch();
-  } catch (error) {
-    list.innerHTML = `<div class="user-loading">${escapeHtml(error.message)}</div>`;
-  }
-}
-
-function toggleUserPanel() {
-  const panel = $('#userPanel');
-  const willOpen = panel.classList.contains('hidden');
-  panel.classList.toggle('hidden');
-  if (willOpen) {
-    loadUsers();
-    checkPrivateUnread();
-    setTimeout(() => $('#userSearch')?.focus(), 50);
-  }
-}
-
-authForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  authStatus.textContent = 'در حال اتصال…';
-  const usernameValue = usernameInput.value.trim();
-  const password = passwordInput.value;
-  try {
-    const data = await api(`/${mode === 'login' ? 'login' : 'register'}`, {
-      method: 'POST', body: JSON.stringify({ username: usernameValue, password })
-    });
-    username = data.username || usernameValue;
-    localStorage.setItem('dorhami_user', username);
-    passwordInput.value = '';
-    showChat();
-  } catch (error) {
-    authStatus.textContent = error.message;
-  }
-});
-
-messageForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const text = messageInput.value.trim();
-  if (!text) return;
-  messageInput.disabled = true;
-  try {
-    if (currentPrivateUser) {
-      await api('/private-messages', { method: 'POST', body: JSON.stringify({ sender: username, recipient: currentPrivateUser, text }) });
-      messageInput.value = '';
-      await loadPrivateMessages();
-    } else {
-      await api('/messages', { method: 'POST', body: JSON.stringify({ username, text }) });
-      messageInput.value = '';
-      await loadMessages();
-    }
-  } catch (error) {
-    $('#onlineText').textContent = error.message;
-  } finally {
-    messageInput.disabled = false;
-    messageInput.focus();
-  }
-});
-
-$('#usersTrigger').addEventListener('click', toggleUserPanel);
-$('#userPanelClose').addEventListener('click', () => $('#userPanel').classList.add('hidden'));
-$('#userSearch')?.addEventListener('input', renderUserListSearch);
-$('#backPublic').addEventListener('click', showPublicChat);
-
-$('#logout').addEventListener('click', async () => {
-  const leavingUser = username;
-  stopPresence();
-  stopUnreadPolling();
-  try {
-    await api('/presence', { method: 'DELETE', body: JSON.stringify({ username: leavingUser }) });
-  } catch (error) {}
-  localStorage.removeItem('dorhami_user');
-  username = '';
-  showAuth();
-});
-
-setupProfileEvents();
-if (username) {
-  usernameInput.value = username;
-  showChat();
-}
+const $=s=>document.querySelector(s);
+const authView=$('#authView'),chatView=$('#chatView'),authForm=$('#authForm'),authStatus=$('#authStatus'),authText=$('#authText'),usernameInput=$('#username'),passwordInput=$('#password'),messagesEl=$('#messages'),messageForm=$('#messageForm'),messageInput=$('#messageInput');
+let mode='login',username=localStorage.getItem('dorhami_user')||'',timer=null,presenceTimer=null,unreadTimer=null,currentPrivateUser='',unreadByUser={},myAvatar='👤';
+const AVATARS=['😀','😎','🥰','🤩','😇','🥳','🤓','😈','👻','🤖','🐱','🐼','🦊','🐸','🐯','🦁','🐵','🐨','🐰','🐙','🦄','🐲','🌙','⭐','🔥'];
+function setMode(next){mode=next;document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.mode===next));authText.textContent=next==='login'?'وارد شدن':'ساخت حساب';passwordInput.autocomplete=next==='login'?'current-password':'new-password';authStatus.textContent=''}
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>setMode(b.dataset.mode)));
+async function api(path,options={}){const r=await fetch(path,{...options,headers:{'content-type':'application/json',...(options.headers||{})}});const d=await r.json().catch(()=>({error:'پاسخ نامعتبر از سرور'}));if(!r.ok)throw Error(d.error||'خطایی رخ داد');return d}
+function avatarFor(name){return window.dorhamiAvatars?.[name]||'👤'}
+function escapeHtml(v){return String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
+async function loadProfile(name){try{const d=await api(`/profile?username=${encodeURIComponent(name)}`,{method:'GET',headers:{}});window.dorhamiAvatars=window.dorhamiAvatars||{};window.dorhamiAvatars[name]=d.profile.avatar||'👤';return d.profile.avatar||'👤'}catch(e){return avatarFor(name)}}
+async function loadMyProfile(){myAvatar=await loadProfile(username);$('#myAvatar').textContent=myAvatar;$('#myProfileName').textContent=username}
+function openProfile(name){const p=$('#profilePopover');if(!p)return;const clean=String(name||'').trim();$('#profileAvatar').textContent=avatarFor(clean);$('#profileUsername').textContent=clean||'کاربر';$('#profileStatus').textContent=clean===username?'پروفایل من':'عضو دورهمی';p.classList.remove('hidden')}
+function closeProfile(){$('#profilePopover')?.classList.add('hidden')}
+function openAvatarPicker(){if(!username)return;const grid=$('#avatarGrid');grid.innerHTML=AVATARS.map(a=>`<button class="avatar-option${a===myAvatar?' selected':''}" type="button" data-avatar="${a}">${a}</button>`).join('');$('#avatarPicker').classList.remove('hidden');grid.querySelectorAll('.avatar-option').forEach(b=>b.addEventListener('click',()=>saveAvatar(b.dataset.avatar)))}
+function closeAvatarPicker(){$('#avatarPicker').classList.add('hidden')}
+async function saveAvatar(avatar){try{const d=await api('/profile',{method:'POST',body:JSON.stringify({username,avatar})});myAvatar=d.profile.avatar;window.dorhamiAvatars=window.dorhamiAvatars||{};window.dorhamiAvatars[username]=myAvatar;$('#myAvatar').textContent=myAvatar;$('#profileAvatar').textContent=myAvatar;closeAvatarPicker();renderUserListSearch()}catch(e){alert(e.message)}}
+function setupProfileEvents(){$('#myProfile')?.addEventListener('click',()=>openProfile(username));$('#profileAvatar')?.addEventListener('click',openAvatarPicker);$('#profileClose')?.addEventListener('click',closeProfile);$('#avatarPickerClose')?.addEventListener('click',closeAvatarPicker);$('#avatarPicker')?.addEventListener('click',e=>{if(e.target.id==='avatarPicker')closeAvatarPicker()});document.addEventListener('click',e=>{const p=$('#profilePopover');if(p&&!p.classList.contains('hidden')&&!p.contains(e.target)&&!$('#myProfile')?.contains(e.target))closeProfile()})}
+async function updatePresence(){if(!username)return;try{await api('/presence',{method:'POST',body:JSON.stringify({username})});const d=await api('/presence',{method:'GET',headers:{}});const label=`${d.count||0} نفر آنلاین`;$('#onlineText').textContent=`${label} · ${username}`;$('#onlineText').title=(d.users||[]).map(u=>u.username).join('، ');const m=document.querySelector('.mini-count');if(m)m.textContent=`● ${label}`}catch(e){}}
+function startPresence(){if(presenceTimer)clearInterval(presenceTimer);updatePresence();presenceTimer=setInterval(updatePresence,10000)}
+function stopPresence(){if(presenceTimer)clearInterval(presenceTimer);presenceTimer=null}
+function updateUnreadBadge(){const total=Object.values(unreadByUser).reduce((s,c)=>s+c,0),b=$('#privateUnreadBadge');if(b){b.textContent=total>99?'99+':String(total);b.classList.toggle('hidden',total===0)}document.title=total?`(${total>99?'99+':total}) چت دورهمی`:'چت دورهمی | گپ دوستانه'}
+async function checkPrivateUnread(){if(!username)return;try{const d=await api(`/private-unread?me=${encodeURIComponent(username)}`,{method:'GET',headers:{}});unreadByUser={};(d.users||[]).forEach(x=>unreadByUser[x.sender]=Number(x.count||0));if(currentPrivateUser)delete unreadByUser[currentPrivateUser];updateUnreadBadge();if(!$('#userPanel').classList.contains('hidden'))renderUserListSearch()}catch(e){}}
+function startUnreadPolling(){if(unreadTimer)clearInterval(unreadTimer);checkPrivateUnread();unreadTimer=setInterval(checkPrivateUnread,2500)}
+function stopUnreadPolling(){if(unreadTimer)clearInterval(unreadTimer);unreadTimer=null;unreadByUser={};updateUnreadBadge()}
+async function showChat(){authView.classList.add('hidden');chatView.classList.remove('hidden');$('#onlineText').textContent=`در حال اتصال · ${username}`;window.dorhamiAvatars=window.dorhamiAvatars||{};await loadMyProfile();currentPrivateUser='';showPublicChat();startPresence();startUnreadPolling();if(timer)clearInterval(timer);timer=setInterval(loadCurrentConversation,2500);messageInput.focus()}
+function showAuth(){if(timer)clearInterval(timer);stopPresence();stopUnreadPolling();closeProfile();chatView.classList.add('hidden');authView.classList.remove('hidden')}
+function showPublicChat(){currentPrivateUser='';$('#privateBar').classList.add('hidden');$('#roomName').textContent='اتاق عمومی دورهمی';messageInput.placeholder='پیامت رو بنویس...';loadMessages();checkPrivateUnread()}
+function renderMessages(list){if(!list.length){messagesEl.innerHTML='<div class="welcome"><b>به دورهمی خوش اومدی 🌙</b><span>اولین پیام رو تو بفرست!</span></div>';return}messagesEl.innerHTML=list.map(m=>{const mine=m.username===username?' mine':'',t=new Date(m.created_at).toLocaleTimeString('fa-IR',{hour:'2-digit',minute:'2-digit'});return `<article class="message${mine}" data-username="${escapeHtml(m.username)}"><button class="message-user" type="button"><span class="message-avatar avatar">${escapeHtml(avatarFor(m.username))}</span><span class="meta">${escapeHtml(m.username)} · ${t}</span></button><div class="body">${escapeHtml(m.text)}</div></article>`}).join('');messagesEl.querySelectorAll('.message-user').forEach(b=>b.addEventListener('click',async()=>{await loadProfile(b.closest('.message')?.dataset.username||'');openProfile(b.closest('.message')?.dataset.username||'')}));messagesEl.scrollTop=messagesEl.scrollHeight}
+function renderPrivateMessages(list){if(!list.length){messagesEl.innerHTML='<div class="welcome"><b>گفتگوی خصوصی 🌙</b><span>اولین پیام را بفرست!</span></div>';return}messagesEl.innerHTML=list.map(m=>{const mine=m.sender===username?' mine',t=new Date(m.created_at).toLocaleTimeString('fa-IR',{hour:'2-digit',minute:'2-digit'});return `<article class="message${mine}" data-username="${escapeHtml(m.sender)}"><button class="message-user" type="button"><span class="message-avatar avatar">${escapeHtml(avatarFor(m.sender))}</span><span class="meta">${escapeHtml(m.sender)} · ${t}</span></button><div class="body">${escapeHtml(m.text)}</div></article>`}).join('');messagesEl.scrollTop=messagesEl.scrollHeight}
+async function loadMessages(){try{const d=await api('/messages',{method:'GET',headers:{}});if(!currentPrivateUser){const names=[...new Set((d.messages||[]).map(m=>m.username))];await Promise.all(names.map(loadProfile));renderMessages(d.messages||[])}}catch(e){$('#onlineText').textContent='اتصال دوباره در حال تلاش است…'}}
+async function loadPrivateMessages(){if(!currentPrivateUser)return;try{const d=await api(`/private-messages?me=${encodeURIComponent(username)}&with=${encodeURIComponent(currentPrivateUser)}`,{method:'GET',headers:{}});if(currentPrivateUser){const names=[...new Set((d.messages||[]).map(m=>m.sender))];await Promise.all(names.map(loadProfile));renderPrivateMessages(d.messages||[]);const last=(d.messages||[]).at(-1);if(last)await markPrivateRead(currentPrivateUser,last.id)}}catch(e){$('#onlineText').textContent=e.message}}
+async function markPrivateRead(otherUser,lastReadId){if(!otherUser||!lastReadId)return;try{await api('/private-read',{method:'POST',body:JSON.stringify({username,otherUser,lastReadId})});delete unreadByUser[otherUser];updateUnreadBadge()}catch(e){}}
+async function loadCurrentConversation(){if(currentPrivateUser)await loadPrivateMessages();else await loadMessages()}
+async function openPrivateChat(otherUser){const clean=String(otherUser||'').trim();if(!clean||clean===username)return;currentPrivateUser=clean;delete unreadByUser[clean];updateUnreadBadge();$('#userPanel').classList.add('hidden');$('#privateBar').classList.remove('hidden');$('#privateWith').textContent=clean;$('#roomName').textContent=`گفتگوی خصوصی با ${clean}`;$('#onlineText').textContent='گفتگوی خصوصی';messageInput.placeholder=`پیام برای ${clean}...`;await loadProfile(clean);await loadPrivateMessages();messageInput.focus()}
+function renderUserListSearch(){const list=$('#userList'),q=String($('#userSearch')?.value||'').trim().toLocaleLowerCase(),users=window.dorhamiUsers||[],filtered=users.filter(n=>n.toLocaleLowerCase().includes(q));if(!filtered.length){list.innerHTML='<div class="user-loading">کاربری با این نام پیدا نشد.</div>';return}list.innerHTML=filtered.map(name=>{const count=Number(unreadByUser[name]||0);return `<button class="user-item" type="button" data-user="${escapeHtml(name)}"><span class="avatar">${escapeHtml(avatarFor(name))}</span><span class="user-item-text"><b>${escapeHtml(name)}</b><small>شروع پیام خصوصی</small></span>${count?`<span class="unread-count">${count>99?'99+':count}</span>`:''}</button>`}).join('');list.querySelectorAll('.user-item').forEach(b=>b.addEventListener('click',()=>openPrivateChat(b.dataset.user)))}
+async function loadUsers(){const list=$('#userList');list.innerHTML='<div class="user-loading">در حال دریافت کاربران…</div>';try{const d=await api('/users',{method:'GET',headers:{}});window.dorhamiAvatars=window.dorhamiAvatars||{};(d.users||[]).forEach(u=>window.dorhamiAvatars[u.username]=u.avatar||'👤');window.dorhamiUsers=(d.users||[]).map(u=>u.username).filter(n=>n!==username);if(!window.dorhamiUsers.length){list.innerHTML='<div class="user-loading">کاربر دیگری برای گفتگوی خصوصی نیست.</div>';return}renderUserListSearch()}catch(e){list.innerHTML=`<div class="user-loading">${escapeHtml(e.message)}</div>`}}
+function toggleUserPanel(){const p=$('#userPanel'),open=p.classList.contains('hidden');p.classList.toggle('hidden');if(open){loadUsers();checkPrivateUnread();setTimeout(()=>$('#userSearch')?.focus(),50)}}
+authForm.addEventListener('submit',async e=>{e.preventDefault();authStatus.textContent='در حال اتصال…';const u=usernameInput.value.trim(),password=passwordInput.value;try{const d=await api(`/${mode==='login'?'login':'register'}`,{method:'POST',body:JSON.stringify({username:u,password})});username=d.username||u;localStorage.setItem('dorhami_user',username);passwordInput.value='';window.dorhamiAvatars=window.dorhamiAvatars||{};window.dorhamiAvatars[username]=d.avatar||'👤';showChat()}catch(err){authStatus.textContent=err.message}});
+messageForm.addEventListener('submit',async e=>{e.preventDefault();const text=messageInput.value.trim();if(!text)return;messageInput.disabled=true;try{if(currentPrivateUser){await api('/private-messages',{method:'POST',body:JSON.stringify({sender:username,recipient:currentPrivateUser,text})});messageInput.value='';await loadPrivateMessages()}else{await api('/messages',{method:'POST',body:JSON.stringify({username,text})});messageInput.value='';await loadMessages()}}catch(err){$('#onlineText').textContent=err.message}finally{messageInput.disabled=false;messageInput.focus()}});
+$('#usersTrigger').addEventListener('click',toggleUserPanel);$('#userPanelClose').addEventListener('click',()=>$('#userPanel').classList.add('hidden'));$('#userSearch')?.addEventListener('input',renderUserListSearch);$('#backPublic').addEventListener('click',showPublicChat);$('#logout').addEventListener('click',async()=>{const leaving=username;stopPresence();stopUnreadPolling();try{await api('/presence',{method:'DELETE',body:JSON.stringify({username:leaving})})}catch(e){}localStorage.removeItem('dorhami_user');username='';showAuth()});
+setupProfileEvents();if(username){usernameInput.value=username;showChat()}
