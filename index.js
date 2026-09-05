@@ -140,6 +140,12 @@ export class ChatRoom extends DurableObject {
         return json({ ok: true, admin: user.username });
       }
 
+      if (request.method === "GET" && url.pathname === "/profile/me") {
+        const username = this.getSessionUsername(request);
+        if (!username) return json({ error: "برای دریافت هویت حساب باید وارد حساب خودت باشی." }, 401);
+        return json({ ok: true, username });
+      }
+
       if (request.method === "POST" && url.pathname === "/register") {
         const body = await request.json();
         const username = String(body.username || "").trim();
@@ -340,7 +346,7 @@ export class ChatRoom extends DurableObject {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const apiPaths = new Set(["/health", "/register", "/login", "/profile", "/users", "/presence", "/typing", "/messages", "/reactions", "/private-messages", "/private-unread", "/private-read", "/admin"]);
+    const apiPaths = new Set(["/health", "/register", "/login", "/profile", "/profile/me", "/users", "/presence", "/typing", "/messages", "/reactions", "/private-messages", "/private-unread", "/private-read", "/admin"]);
     if (apiPaths.has(url.pathname)) {
       try {
         const id = env.CHAT_ROOM.idFromName("public-room");
