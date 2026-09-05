@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#080b18">
+  <title>پنل مدیریت | دورهمی</title>
+  <style>
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;font-family:Tahoma,Arial,sans-serif;background:radial-gradient(circle at 50% 0%,#25204a 0,#0b1022 42%,#060914 100%);color:#fff;padding:24px}
+    .wrap{width:min(920px,100%);margin:0 auto}
+    .head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:24px}
+    .brand{font-size:24px;font-weight:900}.brand small{display:block;margin-top:6px;color:#94a3b8;font-size:11px;font-weight:500}
+    .back{color:#fff;text-decoration:none;padding:10px 14px;border:1px solid rgba(255,255,255,.1);border-radius:12px;background:rgba(255,255,255,.05);font-size:11px}
+    .panel{padding:24px;border:1px solid rgba(255,255,255,.1);border-radius:24px;background:rgba(13,18,38,.82);box-shadow:0 24px 70px rgba(0,0,0,.35);backdrop-filter:blur(14px)}
+    .status{display:flex;align-items:center;gap:9px;margin-bottom:22px;color:#a7f3d0;font-size:11px}.dot{width:8px;height:8px;border-radius:50%;background:#34d399;box-shadow:0 0 12px #34d399}
+    .cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+    .card{padding:18px;border:1px solid rgba(255,255,255,.08);border-radius:17px;background:rgba(255,255,255,.035)}
+    .card b{display:block;font-size:13px;margin-bottom:7px}.card span{color:#64748b;font-size:10px}
+    .loading{text-align:center;color:#94a3b8;font-size:11px;padding:20px}
+    .error{display:none;padding:16px;border-radius:14px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);color:#fecaca;font-size:11px;line-height:1.9}
+    @media(max-width:600px){body{padding:14px}.head{align-items:flex-start}.cards{grid-template-columns:1fr}.panel{padding:18px}}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header class="head">
+      <div class="brand">🛡️ پنل مدیریت دورهمی<small>مدیریت امن و متمرکز سامانه</small></div>
+      <a class="back" href="/">← بازگشت به دورهمی</a>
+    </header>
+    <section class="panel">
+      <div class="status"><i class="dot"></i><span id="adminStatus">در حال بررسی دسترسی مدیر…</span></div>
+      <div id="error" class="error"></div>
+      <div id="content" hidden>
+        <div class="cards">
+          <div class="card"><b>👥 کاربران</b><span>بخش مدیریت کاربران در مرحله بعد فعال می‌شود.</span></div>
+          <div class="card"><b>🟢 وضعیت آنلاین</b><span>آمار آنلاین‌ها در مرحله بعد اضافه می‌شود.</span></div>
+          <div class="card"><b>🚫 مسدودسازی</b><span>فعلاً غیرفعال — هیچ عملیات حساسی فعال نیست.</span></div>
+          <div class="card"><b>📊 آمار کلی</b><span>داشبورد آماری در مرحله بعد ساخته می‌شود.</span></div>
+        </div>
+      </div>
+      <div id="loading" class="loading">لطفاً صبر کن…</div>
+    </section>
+  </main>
+  <script>
+    fetch('/admin', {credentials:'same-origin', cache:'no-store'})
+      .then(async response => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'دسترسی به پنل مدیریت امکان‌پذیر نیست.');
+        return data;
+      })
+      .then(data => {
+        document.querySelector('#loading').hidden = true;
+        document.querySelector('#content').hidden = false;
+        document.querySelector('#adminStatus').textContent = 'دسترسی مدیر تأیید شد • ' + String(data.admin || 'مدیر');
+      })
+      .catch(error => {
+        document.querySelector('#loading').hidden = true;
+        const box = document.querySelector('#error');
+        box.textContent = error.message;
+        box.style.display = 'block';
+        document.querySelector('#adminStatus').textContent = 'دسترسی تأیید نشد';
+      });
+  </script>
+</body>
+</html>
