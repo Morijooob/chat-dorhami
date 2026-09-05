@@ -27,9 +27,16 @@
       if (!name) return;
 
       const old = meta.querySelector('.dorhami-crown');
-      if (old) old.remove();
+      const shouldHaveCrown = Boolean(crowns[name]);
 
-      if (!crowns[name]) return;
+      if (!shouldHaveCrown) {
+        if (old) old.remove();
+        return;
+      }
+
+      // Already rendered: do nothing. This prevents the MutationObserver
+      // from triggering itself forever by removing/re-adding the crown.
+      if (old) return;
 
       const crown = document.createElement('span');
       crown.className = 'dorhami-crown';
