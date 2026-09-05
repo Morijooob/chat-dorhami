@@ -1,13 +1,15 @@
 name: Fix voice upload
 
 on:
-  push:
+  issues:
+    types: [opened]
 
 permissions:
   contents: write
 
 jobs:
   patch:
+    if: contains(github.event.issue.title, 'VOICE_UPLOAD_FIX_2026')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,3 +56,8 @@ jobs:
           if git diff --cached --quiet; then exit 0; fi
           git commit -m "fix: parse multipart voice uploads correctly"
           git push
+      - name: Close trigger issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.update({owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, state: 'closed'});
