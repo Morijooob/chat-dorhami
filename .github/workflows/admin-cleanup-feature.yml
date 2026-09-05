@@ -1,0 +1,64 @@
+name: Apply admin public chat cleanup feature
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/admin-cleanup-feature.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch backend and admin panel
+        shell: python
+        run: |
+          from pathlib import Path
+          index = Path('index.js')
+          s = index.read_text(encoding='utf-8')
+          alarm = '''  static PUBLIC_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;\n\n  async ensurePublicCleanupAlarm() {\n    try {\n      const currentAlarm = await this.ctx.storage.getAlarm();\n      if (currentAlarm == null) await this.ctx.storage.setAlarm(Date.now() + ChatRoom.PUBLIC_CLEANUP_INTERVAL_MS);\n    } catch (error) {\n      console.error('Public cleanup alarm setup failed:', error);\n    }\n  }\n\n  async alarm() {\n    try {\n      this.ctx.storage.sql.exec('DELETE FROM messages');\n    } finally {\n      await this.ctx.storage.setAlarm(Date.now() + ChatRoom.PUBLIC_CLEANUP_INTERVAL_MS);\n    }\n  }\n\n'''
+          if alarm not in s: raise SystemExit('Expected cleanup alarm block was not found; stopping safely.')
+          s = s.replace(alarm, '', 1)
+          marker = '      if (request.method === "POST" && url.pathname === "/admin/announcement")'
+          pos = s.find(marker)
+          if pos < 0: raise SystemExit('Admin announcement route not found; stopping safely.')
+          line_end = s.find('\n', pos)
+          endpoint = '      if (request.method === "POST" && url.pathname === "/admin/clear-public-messages") { const admin = this.getAdminUser(request); if (!admin) return json({ error: "دسترسی غیرمجاز." }, 403); const result = this.ctx.storage.sql.exec("DELETE FROM messages"); return json({ ok: true, deleted: Number(result.rowsWritten || 0) }); }\n'
+          if '/admin/clear-public-messages' not in s: s = s[:line_end+1] + endpoint + s[line_end+1:]
+          api_marker = '"/admin/announcement","/admin/user-vip"'
+          if api_marker not in s: raise SystemExit('API path list marker not found; stopping safely.')
+          s = s.replace(api_marker, '"/admin/announcement","/admin/clear-public-messages","/admin/user-vip"', 1)
+          index.write_text(s, encoding='utf-8')
+          panel = Path('public/admin-panel.html')
+          p = panel.read_text(encoding='utf-8')
+          anchor = '<div class="card"><b>🟢 وضعیت آنلاین</b>'
+          if anchor not in p: raise SystemExit('Admin panel card anchor not found; stopping safely.')
+          cleanup_card = '''<div class="card cleanup-card"><b>🧹 پاک‌سازی پیام‌های گروه</b><span>هر وقت خواستی، فقط پیام‌های اتاق عمومی را پاک کن. پیام‌های خصوصی و اتاق‌های VIP دست‌نخورده می‌مانند.</span><div class="cleanup-actions"><button class="clear-public" id="clearPublicMessages" type="button">🗑️ پاک کردن پیام‌های گروه</button><span class="cleanup-status" id="cleanupStatus"></span></div></div>'''
+          if 'id="clearPublicMessages"' not in p: p = p.replace(anchor, cleanup_card + anchor, 1)
+          css_anchor = '    .loading{text-align:center;color:#94a3b8;font-size:11px;padding:20px}\n'
+          css = '    .cleanup-actions{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}\n    .clear-public{border:0;border-radius:12px;padding:10px 16px;background:linear-gradient(135deg,#ef4444,#b91c1c);color:#fff;font:900 11px Tahoma,Arial,sans-serif;cursor:pointer}\n    .clear-public:disabled{opacity:.6;cursor:wait}\n    .cleanup-status{font-size:10px;color:#94a3b8}\n'
+          if '.clear-public{' not in p:
+              if css_anchor not in p: raise SystemExit('Admin panel CSS anchor not found; stopping safely.')
+              p = p.replace(css_anchor, css + css_anchor, 1)
+          script_marker = "    api('/admin')"
+          script = '''    $('#clearPublicMessages').addEventListener('click', async () => {\n      const button = $('#clearPublicMessages');\n      const status = $('#cleanupStatus');\n      const confirmed = confirm('مطمئنی می‌خواهی تمام پیام‌های گروه عمومی پاک شوند؟\\n\\nپیام‌های خصوصی و اتاق‌های VIP پاک نمی‌شوند.');\n      if (!confirmed) return;\n      button.disabled = true;\n      status.textContent = 'در حال پاک‌سازی…';\n      try {\n        const data = await api('/admin/clear-public-messages', {method:'POST'});\n        status.textContent = '✅ ' + String(data.deleted || 0) + ' پیام گروه پاک شد.';\n      } catch (error) {\n        status.textContent = error.message;\n      } finally {\n        button.disabled = false;\n      }\n    });\n'''
+          if 'id="clearPublicMessages"' in p and "api('/admin/clear-public-messages')" not in p:
+              if script_marker not in p: raise SystemExit('Admin panel script anchor not found; stopping safely.')
+              p = p.replace(script_marker, script + script_marker, 1)
+          panel.write_text(p, encoding='utf-8')
+      - name: Commit changes and remove one-shot workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.js public/admin-panel.html
+          git diff --cached --quiet && { echo "No changes to commit"; exit 1; }
+          git commit -m "Add manual public chat cleanup in admin panel"
+          git push
+          rm -f .github/workflows/admin-cleanup-feature.yml
+          git add -A
+          git commit -m "Remove one-shot admin cleanup workflow"
+          git push
