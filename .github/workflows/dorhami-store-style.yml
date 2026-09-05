@@ -1,0 +1,37 @@
+name: Dorhami store style
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  style:
+    if: ${{ !contains(github.event.head_commit.message, 'style: move store sign') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply store sign style
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('public/vip.js')
+          s=p.read_text(encoding='utf-8')
+          old="""#${STORE_BUTTON_ID}{border:1px solid rgba(56,189,248,.38)!important;background:linear-gradient(135deg,rgba(14,165,233,.2),rgba(124,58,237,.18))!important;color:#e0f2fe!important;font-weight:900!important;border-radius:12px!important;padding:8px 11px!important;cursor:pointer;box-shadow:0 4px 16px rgba(14,165,233,.12)}#${STORE_BUTTON_ID}:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(14,165,233,.2)}"""
+          new="""#dorhamiStoreTopBar{display:flex;align-items:center;justify-content:center;width:100%;box-sizing:border-box;padding:6px 10px 5px}#${STORE_BUTTON_ID}{min-width:min(260px,92vw);border:2px solid #fff!important;background:rgba(255,255,255,.96)!important;color:#ef1b2d!important;font-weight:1000!important;border-radius:12px!important;padding:9px 22px!important;cursor:pointer;box-shadow:0 0 5px #fff,0 0 12px rgba(255,255,255,.95),0 0 24px rgba(255,255,255,.65),inset 0 0 10px rgba(255,255,255,.9);text-shadow:0 0 4px rgba(239,27,45,.45),0 0 10px rgba(239,27,45,.7);animation:dorhamiStoreLed 1.15s ease-in-out infinite;letter-spacing:.2px}#${STORE_BUTTON_ID}:hover{transform:translateY(-1px) scale(1.01);box-shadow:0 0 7px #fff,0 0 16px rgba(255,255,255,.98),0 0 30px rgba(255,255,255,.72),inset 0 0 12px rgba(255,255,255,.95)}@keyframes dorhamiStoreLed{0%,100%{opacity:1;text-shadow:0 0 4px rgba(239,27,45,.4),0 0 8px rgba(239,27,45,.65)}50%{opacity:.62;text-shadow:0 0 2px rgba(239,27,45,.25),0 0 5px rgba(239,27,45,.4)}}"""
+          if old not in s:
+              raise SystemExit('store style pattern not found')
+          s=s.replace(old,new,1)
+          old2="""function install(){injectStyle();const actions=document.querySelector('.chat-actions,.header-actions');if(!actions)return;if(!document.getElementById(STORE_BUTTON_ID)){const store=document.createElement('button');store.id=STORE_BUTTON_ID;store.type='button';store.title='فروشگاه دورهمی';store.textContent='🛒 فروشگاه';store.onclick=openStoreModal;actions.insertBefore(store,actions.firstChild)}if(!document.getElementById(BUTTON_ID)){const b=document.createElement('button');b.id=BUTTON_ID;b.type='button';b.title='عضویت VIP';b.textContent='👑 VIP';b.onclick=openVipModal;actions.insertBefore(b,actions.firstChild)}}"""
+          new2="""function install(){injectStyle();const actions=document.querySelector('.chat-actions,.header-actions');if(!actions)return;const announcement=document.querySelector('.dorhami-announcement');let store=document.getElementById(STORE_BUTTON_ID);if(!store){store=document.createElement('button');store.id=STORE_BUTTON_ID;store.type='button';store.title='فروشگاه دورهمی';store.textContent='🛒 فروشگاه دورهمی';store.onclick=openStoreModal}if(announcement){let top=document.getElementById('dorhamiStoreTopBar');if(!top){top=document.createElement('div');top.id='dorhamiStoreTopBar';announcement.parentNode.insertBefore(top,announcement)}if(store.parentElement!==top)top.appendChild(store)}else if(store.parentElement!==actions){actions.appendChild(store)}if(!document.getElementById(BUTTON_ID)){const b=document.createElement('button');b.id=BUTTON_ID;b.type='button';b.title='عضویت VIP';b.textContent='👑 VIP';b.onclick=openVipModal;actions.insertBefore(b,actions.firstChild)}}"""
+          if old2 not in s:
+              raise SystemExit('install pattern not found')
+          s=s.replace(old2,new2,1)
+          p.write_text(s,encoding='utf-8')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/vip.js .github/workflows/dorhami-store-style.yml
+          git rm .github/workflows/dorhami-store-style.yml
+          git diff --cached --quiet && exit 0
+          git commit -m "style: move store sign"
+          git push
