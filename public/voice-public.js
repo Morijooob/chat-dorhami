@@ -25,9 +25,6 @@
     if (!response.ok || !data.is_vip) throw new Error('👑 ارسال ویس فقط برای کاربران VIP فعال است.');
   }
 
-  // The upload API accepts base MIME values. Some Android browsers report
-  // codec parameters such as audio/webm;codecs=opus, so prefer the exact
-  // server-supported value and normalize the resulting Blob type.
   function mimeType() {
     const types = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/wav'];
     return types.find(type => window.MediaRecorder?.isTypeSupported?.(type)) || '';
@@ -89,16 +86,17 @@
       const upload = new FormData();
       const mime = String(pendingVoiceBlob.type || 'audio/webm').split(';')[0].trim().toLowerCase();
       const ext = mime.includes('ogg') ? 'ogg' : mime.includes('mp4') ? 'mp4' : mime.includes('mpeg') ? 'mp3' : mime.includes('wav') ? 'wav' : 'webm';
-      upload.append('file', pendingVoiceBlob, `voice.${ext}`);
+      upload.append('file', new File([pendingVoiceBlob], `voice.${ext}`, { type: mime }));
       const response = await fetch('/voice/upload', { method: 'POST', body: upload });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'آپلود ویس انجام نشد.');
-      if (!data.id) throw new Error('شناسه ویس از سرور دریافت نشد.');
+      const voiceId = data.voice_id || data.id;
+      if (!voiceId) throw new Error('شناسه ویس از سرور دریافت نشد.');
       const me = localStorage.getItem('dorhami_user') || '';
       const send = await fetch('/messages', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ username: me, text: `[voice:${data.id}:${mime}]` })
+        body: JSON.stringify({ username: me, text: `[voice:${voiceId}:${mime}]` })
       });
       const sendData = await send.json().catch(() => ({}));
       if (!send.ok) throw new Error(sendData.error || 'ارسال ویس انجام نشد.');
