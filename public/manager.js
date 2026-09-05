@@ -27,25 +27,42 @@
   }
 
   let verifiedManager = false;
+  let lastKnownUser = '';
+
+  function currentLocalUser() {
+    return String(localStorage.getItem('dorhami_user') || '').trim();
+  }
 
   async function verifyManager() {
     try {
-      const response = await fetch('/profile/me', { cache: 'no-store' });
+      const response = await fetch('/profile/me?t=' + Date.now(), { cache: 'no-store' });
       const data = await response.json().catch(() => ({}));
-      verifiedManager = response.ok && String(data.username || '').trim() === MANAGER;
+      const serverUser = String(data.username || '').trim();
+      lastKnownUser = serverUser;
+      verifiedManager = response.ok && serverUser === MANAGER && currentLocalUser() === MANAGER;
       return verifiedManager;
     } catch (_) {
       verifiedManager = false;
+      lastKnownUser = '';
       return false;
     }
   }
 
+  function clearManagerDecorations() {
+    document.querySelectorAll('.manager-badge').forEach(el => el.remove());
+    document.querySelectorAll('.manager-avatar').forEach(el => el.classList.remove('manager-avatar'));
+    document.querySelectorAll('.manager-profile-title').forEach(el => el.classList.remove('manager-profile-title'));
+  }
+
   function decorateOwnProfile() {
-    if (!verifiedManager) return;
+    if (!verifiedManager) {
+      clearManagerDecorations();
+      return;
+    }
 
     const mine = document.getElementById('myProfile');
     const mineName = document.getElementById('myProfileName');
-    if (mine && mineName) {
+    if (mine && mineName && currentLocalUser() === MANAGER) {
       mine.querySelector('.avatar')?.classList.add('manager-avatar');
       if (!mine.querySelector('.manager-badge')) mine.appendChild(badge());
     }
@@ -61,6 +78,10 @@
       if (status) status.textContent = 'مدیرکل دورهمی';
       if (kicker) kicker.textContent = 'مدیرکل دورهمی';
     }
+
+    document.querySelectorAll('.message[data-username="Morteza2026"] .message-avatar').forEach(el => {
+      el.classList.add('manager-avatar');
+    });
   }
 
   async function makeManagerVip() {
@@ -74,16 +95,39 @@
     } catch (_) {}
   }
 
+  async function refreshIdentityAndDecorate() {
+    const localUser = currentLocalUser();
+    if (localUser !== MANAGER) {
+      verifiedManager = false;
+      clearManagerDecorations();
+      return;
+    }
+    if (lastKnownUser !== MANAGER) await verifyManager();
+    if (!verifiedManager) {
+      clearManagerDecorations();
+      return;
+    }
+    decorateOwnProfile();
+  }
+
   async function start() {
     installStyle();
     await verifyManager();
-    decorateOwnProfile();
-    if (verifiedManager) makeManagerVip();
+    if (verifiedManager) {
+      decorateOwnProfile();
+      makeManagerVip();
+    } else {
+      clearManagerDecorations();
+    }
 
+    let timer = null;
     const observer = new MutationObserver(() => {
-      if (verifiedManager) decorateOwnProfile();
+      clearTimeout(timer);
+      timer = setTimeout(refreshIdentityAndDecorate, 40);
     });
     observer.observe(document.body, {subtree:true, childList:true});
+
+    setInterval(refreshIdentityAndDecorate, 1500);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, {once:true});
