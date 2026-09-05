@@ -150,10 +150,26 @@ function setupProfileEvents() {
   });
 }
 
+function showActivityRewardToast(text) {
+  let toast = document.getElementById('activityRewardToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'activityRewardToast';
+    toast.style.cssText = 'position:fixed;left:50%;bottom:88px;transform:translateX(-50%);z-index:9999;padding:12px 18px;border-radius:999px;background:rgba(25,25,35,.94);color:#fff;font-weight:700;box-shadow:0 10px 30px rgba(0,0,0,.25);pointer-events:none;';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = text;
+  toast.style.opacity = '1';
+  clearTimeout(window.activityRewardToastTimer);
+  window.activityRewardToastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 2800);
+}
+
 async function updatePresence() {
   if (!username) return;
   try {
     await api('/presence', { method: 'POST', body: JSON.stringify({ username }) });
+    const reward = await api('/rewards/claim', { method: 'POST', body: JSON.stringify({}) });
+    if (reward.rewarded) showActivityRewardToast('🎁 پاداش فعالیت: ۱۰ 🌹 گل به حسابت اضافه شد!');
     const data = await api('/presence', { method: 'GET', headers: {} });
     const names = (data.users || []).map(u => u.username);
     const label = `${data.count || 0} نفر آنلاین`;
