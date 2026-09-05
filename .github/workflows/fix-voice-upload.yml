@@ -1,7 +1,9 @@
 name: Fix voice upload
 
 on:
-  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/fix-voice-upload.yml'
 
 permissions:
   contents: write
