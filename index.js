@@ -30,7 +30,8 @@ export class ChatRoom extends DurableObject {
         username TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
         created_at INTEGER NOT NULL,
-        avatar TEXT NOT NULL DEFAULT '👤'
+        avatar TEXT NOT NULL DEFAULT '👤',
+        role TEXT NOT NULL DEFAULT 'user'
       );
       CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,6 +71,7 @@ export class ChatRoom extends DurableObject {
       CREATE INDEX IF NOT EXISTS message_reactions_key ON message_reactions(message_key);
     `);
     try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN avatar TEXT NOT NULL DEFAULT '👤'"); } catch (error) {}
+    try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"); } catch (error) {}
   }
 
   async fetch(request) {
