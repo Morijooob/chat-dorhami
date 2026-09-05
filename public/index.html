@@ -16,6 +16,23 @@
 <script src="/diamond.js?v=20260905-diamond1" defer></script>
 <script>
 (() => {
+  const board = document.querySelector('.dorhami-announcement-text');
+  if (!board) return;
+  const fallback = board.textContent.trim();
+  fetch('/announcement?t=' + Date.now(), {cache:'no-store'})
+    .then(response => response.ok ? response.json() : Promise.reject(new Error('announcement')))
+    .then(data => {
+      const text = String(data.text || '').trim();
+      if (text) board.textContent = text;
+      board.style.animation = 'none';
+      void board.offsetWidth;
+      board.style.animation = 'dorhamiLed 18s linear infinite';
+    })
+    .catch(() => { board.textContent = fallback; });
+})();
+</script>
+<script>
+(() => {
   const originalOpenProfile = window.openProfile;
   if (typeof originalOpenProfile !== 'function') return;
   window.openProfile = function(name) {
