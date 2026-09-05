@@ -25,8 +25,11 @@
     if (!response.ok || !data.is_vip) throw new Error('👑 ارسال ویس فقط برای کاربران VIP فعال است.');
   }
 
+  // The upload API accepts base MIME values. Some Android browsers report
+  // codec parameters such as audio/webm;codecs=opus, so prefer the exact
+  // server-supported value and normalize the resulting Blob type.
   function mimeType() {
-    const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+    const types = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/wav'];
     return types.find(type => window.MediaRecorder?.isTypeSupported?.(type)) || '';
   }
 
@@ -44,7 +47,8 @@
       button.classList.remove('recording');
       button.textContent = '🎙️';
       if (!chunks.length) { setStatus('ضبطی ثبت نشد.', true); recorder = null; return; }
-      pendingVoiceBlob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+      const actualMime = String(recorder.mimeType || type || 'audio/webm').split(';')[0].trim().toLowerCase();
+      pendingVoiceBlob = new Blob(chunks, { type: actualMime });
       const kb = Math.max(1, Math.round(pendingVoiceBlob.size / 1024));
       if (pendingVoiceBlob.size > 2 * 1024 * 1024) {
         pendingVoiceBlob = null;
@@ -83,7 +87,8 @@
     try {
       setStatus('⏳ در حال ارسال ویس…', true);
       const upload = new FormData();
-      const ext = pendingVoiceBlob.type.includes('ogg') ? 'ogg' : pendingVoiceBlob.type.includes('mp4') ? 'mp4' : 'webm';
+      const mime = String(pendingVoiceBlob.type || 'audio/webm').split(';')[0].trim().toLowerCase();
+      const ext = mime.includes('ogg') ? 'ogg' : mime.includes('mp4') ? 'mp4' : mime.includes('mpeg') ? 'mp3' : mime.includes('wav') ? 'wav' : 'webm';
       upload.append('file', pendingVoiceBlob, `voice.${ext}`);
       const response = await fetch('/voice/upload', { method: 'POST', body: upload });
       const data = await response.json().catch(() => ({}));
@@ -93,7 +98,7 @@
       const send = await fetch('/messages', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ username: me, text: `[voice:${data.id}:${pendingVoiceBlob.type || 'audio/webm'}]` })
+        body: JSON.stringify({ username: me, text: `[voice:${data.id}:${mime}]` })
       });
       const sendData = await send.json().catch(() => ({}));
       if (!send.ok) throw new Error(sendData.error || 'ارسال ویس انجام نشد.');
