@@ -195,4 +195,9 @@
 
   pollTyping();
   pollTimer = setInterval(pollTyping, 1500);
+
+  const managerScript = document.createElement('script');
+  managerScript.src = '/manager.js?v=20260905-manager1';
+  managerScript.defer = true;
+  document.head.appendChild(managerScript);
 })();
