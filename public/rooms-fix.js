@@ -1,51 +1,26 @@
 (()=>{
   const api=async(path,options={})=>{const r=await fetch(path,{...options,headers:{'content-type':'application/json',...(options.headers||{})},cache:'no-store'});const d=await r.json().catch(()=>({error:'پاسخ نامعتبر از سرور'}));if(!r.ok)throw new Error(d.error||'خطایی رخ داد');return d};
-  const esc=v=>String(v??'').replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));
+  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const style=()=>{if(document.getElementById('dorhamiRoomsFixStyle'))return;const s=document.createElement('style');s.id='dorhamiRoomsFixStyle';s.textContent=`.dorhami-home-rooms{margin:0 0 10px;padding:10px;border:1px solid rgba(250,204,21,.22);border-radius:14px;background:linear-gradient(135deg,rgba(250,204,21,.08),rgba(124,58,237,.08));direction:rtl}.dorhami-home-rooms-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}.dorhami-home-rooms-head b{font-size:11px}.dorhami-home-rooms-head small{font-size:9px;color:#94a3b8}.dorhami-home-room-list{display:flex;gap:7px;overflow:auto;padding-bottom:2px}.dorhami-home-room{flex:0 0 auto;border:1px solid rgba(255,255,255,.09);border-radius:11px;padding:8px 10px;background:rgba(255,255,255,.045);color:#fff;cursor:pointer;text-align:right;min-width:130px}.dorhami-home-room b{display:block;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dorhami-home-room small{display:block;margin-top:3px;color:#aab4cc;font-size:8px}.dorhami-room-share-link{display:block;margin:6px 14px 10px;padding:8px 10px;border-radius:10px;background:rgba(250,204,21,.07);border:1px dashed rgba(250,204,21,.28);color:#fde68a!important;font-size:10px;word-break:break-all;text-decoration:none}.dorhami-room-share-link:hover{background:rgba(250,204,21,.13)}.dorhami-room-copy-link{margin-right:6px!important}`;document.head.appendChild(s)};
   function isChatVisible(){const el=document.getElementById('chatView');return !!el&&!el.classList.contains('hidden')}
   function roomUrl(code){return `${location.origin}/?join=${encodeURIComponent(code)}`}
   async function openRoomViaUi(roomId){
-    const existing=document.querySelector(`[data-room-open="${CSS.escape(roomId)}"]`);if(existing){existing.click();return}
-    document.getElementById('dorhamiRoomChat')?.remove();
-    document.getElementById('dorhamiRoomsModal')?.remove();
-    const vip=document.getElementById('dorhamiVipButton');if(!vip)return;
-    vip.click();
-    for(let i=0;i<30;i++){
-      await new Promise(r=>setTimeout(r,100));
-      const btn=document.getElementById('dorhamiOpenRooms');if(btn){btn.click();break}
-    }
-    for(let i=0;i<50;i++){
-      await new Promise(r=>setTimeout(r,120));
-      const item=document.querySelector(`[data-room-open="${CSS.escape(roomId)}"]`);if(item){item.click();return}
-    }
+    const selector=`[data-room-open="${CSS.escape(roomId)}"]`;const existing=document.querySelector(selector);if(existing){existing.click();return}
+    document.getElementById('dorhamiRoomChat')?.remove();document.getElementById('dorhamiRoomsModal')?.remove();
+    const vip=document.getElementById('dorhamiVipButton');if(!vip)return;vip.click();
+    for(let i=0;i<30;i++){await new Promise(r=>setTimeout(r,100));const btn=document.getElementById('dorhamiOpenRooms');if(btn){btn.click();break}}
+    for(let i=0;i<50;i++){await new Promise(r=>setTimeout(r,120));const item=document.querySelector(selector);if(item){item.click();return}}
   }
   async function renderHomeRooms(){
-    if(!isChatVisible())return;
-    let box=document.getElementById('dorhamiHomeRooms');
-    const messages=document.getElementById('messages');if(!messages)return;
+    if(!isChatVisible())return;let box=document.getElementById('dorhamiHomeRooms');const messages=document.getElementById('messages');if(!messages)return;
     if(!box){box=document.createElement('section');box.id='dorhamiHomeRooms';box.className='dorhami-home-rooms';messages.parentNode.insertBefore(box,messages)}
-    try{
-      const d=await api('/rooms/mine');const rooms=d.rooms||[];
-      if(!rooms.length){box.innerHTML='<div class="dorhami-home-rooms-head"><b>🏠 اتاق‌های من</b><small>اتاقی نداری</small></div>';return}
-      box.innerHTML=`<div class="dorhami-home-rooms-head"><b>🏠 اتاق‌های من</b><small>${rooms.length} اتاق</small></div><div class="dorhami-home-room-list">${rooms.map(r=>`<button type="button" class="dorhami-home-room" data-home-room="${esc(r.id)}"><b>🏠 ${esc(r.name)}</b><small>👥 ${Number(r.member_count||0)} نفر · 👑 ${esc(r.owner)}</small></button>`).join('')}</div>`;
-      box.querySelectorAll('[data-home-room]').forEach(b=>b.onclick=()=>openRoomViaUi(b.dataset.homeRoom));
-    }catch(e){box.innerHTML='<div class="dorhami-home-rooms-head"><b>🏠 اتاق‌های من</b><small>خطا در دریافت اتاق‌ها</small></div>'}
+    try{const d=await api('/rooms/mine');const rooms=d.rooms||[];if(!rooms.length){box.innerHTML='<div class="dorhami-home-rooms-head"><b>🏠 اتاق‌های من</b><small>اتاقی نداری</small></div>';return}box.innerHTML=`<div class="dorhami-home-rooms-head"><b>🏠 اتاق‌های من</b><small>${rooms.length} اتاق</small></div><div class="dorhami-home-room-list">${rooms.map(r=>`<button type="button" class="dorhami-home-room" data-home-room="${esc(r.id)}"><b>🏠 ${esc(r.name)}</b><small>👥 ${Number(r.member_count||0)} نفر · 👑 ${esc(r.owner)}</small></button>`).join('')}</div>`;box.querySelectorAll('[data-home-room]').forEach(b=>b.onclick=()=>openRoomViaUi(b.dataset.homeRoom))}catch(e){box.innerHTML='<div class="dorhami-home-rooms-head"><b>🏠 اتاق‌های من</b><small>خطا در دریافت اتاق‌ها</small></div>'}
   }
   function makeMessageLinks(root=document){
-    root.querySelectorAll('.body').forEach(el=>{
-      if(el.dataset.roomLinksDone==='1')return;
-      const text=el.textContent||'';const re=/(https?:\/\/[^\s]+|\/?\?join=[A-Za-z0-9_-]{4,32})/g;
-      if(!re.test(text))return;
-      el.dataset.roomLinksDone='1';re.lastIndex=0;let html='',last=0,m;
-      while((m=re.exec(text))){const raw=m[0];const clean=raw.replace(/[.,،!?؟)]+$/,'');const start=m.index;html+=esc(text.slice(last,start));const href=clean.startsWith('http')?clean:`${location.origin}${clean}`;html+=`<a href="${esc(href)}" target="_self" rel="nofollow noopener" style="color:#a78bfa;text-decoration:underline;word-break:break-all">${esc(clean)}</a>`;last=start+clean.length}
-      html+=esc(text.slice(last));el.innerHTML=html;
-    });
+    root.querySelectorAll('.body').forEach(el=>{if(el.dataset.roomLinksDone==='1')return;const text=el.textContent||'';const re=/(https?:\/\/[^\s]+|\/?\?join=[A-Za-z0-9_-]{4,32})/g;if(!re.test(text))return;el.dataset.roomLinksDone='1';re.lastIndex=0;let html='',last=0,m;while((m=re.exec(text))){const raw=m[0],clean=raw.replace(/[.,،!?؟)]+$/,'');const start=m.index;html+=esc(text.slice(last,start));const href=clean.startsWith('http')?clean:`${location.origin}${clean}`;html+=`<a href="${esc(href)}" target="_self" rel="nofollow noopener" style="color:#a78bfa;text-decoration:underline;word-break:break-all">${esc(clean)}</a>`;last=start+clean.length}html+=esc(text.slice(last));el.innerHTML=html})
   }
   function enhanceRoomShare(){
-    const code=document.getElementById('dorhamiRoomCode');if(!code||code.dataset.linkDone==='1')return;const value=code.textContent.trim();if(!value)return;code.dataset.linkDone='1';
-    const href=roomUrl(value);const host=code.parentElement;if(!host)return;
-    const copy=host.querySelector('#dorhamiCopyRoomCode');if(copy){copy.textContent='کپی لینک';copy.classList.add('dorhami-room-copy-link');copy.onclick=async()=>{try{await navigator.clipboard.writeText(href);copy.textContent='✅ لینک کپی شد';setTimeout(()=>copy.textContent='کپی لینک',1400)}catch(e){alert(href)}}}
-    const a=document.createElement('a');a.className='dorhami-room-share-link';a.href=href;a.textContent='🔗 لینک دعوت این اتاق — برای ارسال در گروه روی آن نگه دار/کپی کن';a.target='_self';a.rel='nofollow noopener';host.insertAdjacentElement('afterend',a);
+    const code=document.getElementById('dorhamiRoomCode');if(!code||code.dataset.linkDone==='1')return;const value=code.textContent.trim();if(!value)return;code.dataset.linkDone='1';const href=roomUrl(value);const host=code.parentElement;if(!host)return;const copy=host.querySelector('#dorhamiCopyRoomCode');if(copy){copy.textContent='کپی لینک';copy.classList.add('dorhami-room-copy-link');copy.onclick=async()=>{try{await navigator.clipboard.writeText(href);copy.textContent='✅ لینک کپی شد';setTimeout(()=>copy.textContent='کپی لینک',1400)}catch(e){alert(href)}}}const a=document.createElement('a');a.className='dorhami-room-share-link';a.href=href;a.textContent='🔗 لینک دعوت این اتاق — برای ارسال در گروه روی آن نگه دار/کپی کن';a.target='_self';a.rel='nofollow noopener';host.insertAdjacentElement('afterend',a)
   }
   let joining=false;
   async function consumePendingJoin(){
@@ -53,6 +28,6 @@
     try{const d=await api('/rooms/join',{method:'POST',body:JSON.stringify({invite_code:code})});history.replaceState({},'',location.pathname);await openRoomViaUi(d.room.id)}catch(e){alert(e.message)}finally{joining=false}
   }
   function rememberLinkBeforeLogin(){let code='';try{code=new URLSearchParams(location.search).get('join')||''}catch(e){}if(code&&!isChatVisible())localStorage.setItem('dorhami_pending_room',code.toUpperCase())}
-  function boot(){style();rememberLinkBeforeLogin();renderHomeRooms();consumePendingJoin();makeMessageLinks();enhanceRoomShare();const obs=new MutationObserver(()=>{makeMessageLinks();enhanceRoomShare();if(isChatVisible())renderHomeRooms()});obs.observe(document.body,{childList:true,subtree:true});setInterval(()=>{renderHomeRooms();consumePendingJoin();enhanceRoomShare()},2500)}
+  function boot(){style();rememberLinkBeforeLogin();renderHomeRooms();consumePendingJoin();makeMessageLinks();enhanceRoomShare();const obs=new MutationObserver(()=>{makeMessageLinks();enhanceRoomShare()});obs.observe(document.body,{childList:true,subtree:true});setInterval(()=>{renderHomeRooms();consumePendingJoin();enhanceRoomShare()},2500)}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
