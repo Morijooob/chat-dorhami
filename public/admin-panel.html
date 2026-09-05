@@ -26,6 +26,10 @@
     .save-board{border:0;border-radius:12px;padding:10px 16px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#111827;font:900 11px Tahoma,Arial,sans-serif;cursor:pointer}
     .save-board:disabled{opacity:.6;cursor:wait}
     .board-status{font-size:10px;color:#94a3b8}
+    .cleanup-actions{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+    .clear-public{border:0;border-radius:12px;padding:10px 16px;background:linear-gradient(135deg,#ef4444,#b91c1c);color:#fff;font:900 11px Tahoma,Arial,sans-serif;cursor:pointer}
+    .clear-public:disabled{opacity:.6;cursor:wait}
+    .cleanup-status{font-size:10px;color:#94a3b8}
     .loading{text-align:center;color:#94a3b8;font-size:11px;padding:20px}
     .error{display:none;padding:16px;border-radius:14px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);color:#fecaca;font-size:11px;line-height:1.9}
     @media(max-width:600px){body{padding:14px}.head{align-items:flex-start}.cards{grid-template-columns:1fr}.board-card{grid-column:auto}.panel{padding:18px}}
@@ -44,7 +48,7 @@
         <div class="cards">
           <a class="card" href="/admin-users.html"><b>👥 کاربران</b><span>مشاهده و جستجوی کاربران ثبت‌نام‌شده.</span></a>
           <div class="card board-card"><b>📢 مدیریت تابلو</b><span>متن تابلو را اینجا بنویس؛ کاربران همان متن را به‌صورت متحرک در صفحه اصلی می‌بینند.</span><div class="board-editor"><textarea id="announcementText" maxlength="1000" placeholder="متن تابلو را بنویس..."></textarea><div class="board-actions"><button class="save-board" id="saveAnnouncement" type="button">💾 ذخیره تابلو</button><span class="board-status" id="boardStatus"></span></div></div></div>
-          <div class="card"><b>🟢 وضعیت آنلاین</b><span>آمار آنلاین‌ها در مرحله بعد اضافه می‌شود.</span></div>
+          <div class="card cleanup-card"><b>🧹 پاک‌سازی پیام‌های گروه</b><span>هر وقت خواستی، فقط پیام‌های اتاق عمومی را پاک کن. پیام‌های خصوصی و اتاق‌های VIP دست‌نخورده می‌مانند.</span><div class="cleanup-actions"><button class="clear-public" id="clearPublicMessages" type="button">🗑️ پاک کردن پیام‌های گروه</button><span class="cleanup-status" id="cleanupStatus"></span></div></div><div class="card"><b>🟢 وضعیت آنلاین</b><span>آمار آنلاین‌ها در مرحله بعد اضافه می‌شود.</span></div>
           <div class="card"><b>🚫 مسدودسازی</b><span>فعلاً غیرفعال — هیچ عملیات حساسی فعال نیست.</span></div>
           <div class="card"><b>📊 آمار کلی</b><span>داشبورد آماری در مرحله بعد ساخته می‌شود.</span></div>
         </div>
@@ -75,6 +79,22 @@
         const data = await api('/admin/announcement', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({text})});
         $('#announcementText').value = String(data.text || text);
         status.textContent = '✅ تابلو با موفقیت ذخیره شد.';
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+    $('#clearPublicMessages').addEventListener('click', async () => {
+      const button = $('#clearPublicMessages');
+      const status = $('#cleanupStatus');
+      const confirmed = confirm('مطمئنی می‌خواهی تمام پیام‌های گروه عمومی پاک شوند؟\n\nپیام‌های خصوصی و اتاق‌های VIP پاک نمی‌شوند.');
+      if (!confirmed) return;
+      button.disabled = true;
+      status.textContent = 'در حال پاک‌سازی…';
+      try {
+        const data = await api('/admin/clear-public-messages', {method:'POST'});
+        status.textContent = '✅ ' + String(data.deleted || 0) + ' پیام گروه پاک شد.';
       } catch (error) {
         status.textContent = error.message;
       } finally {

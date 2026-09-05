@@ -9,25 +9,6 @@ function getCookie(request, name) { const header = request.headers.get("cookie")
 export class ChatRoom extends DurableObject {
   constructor(ctx, env) { super(ctx, env); this.ready = this.initialize(); this.typing = new Map(); }
 
-  static PUBLIC_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
-
-  async ensurePublicCleanupAlarm() {
-    try {
-      const currentAlarm = await this.ctx.storage.getAlarm();
-      if (currentAlarm == null) await this.ctx.storage.setAlarm(Date.now() + ChatRoom.PUBLIC_CLEANUP_INTERVAL_MS);
-    } catch (error) {
-      console.error('Public cleanup alarm setup failed:', error);
-    }
-  }
-
-  async alarm() {
-    try {
-      this.ctx.storage.sql.exec('DELETE FROM messages');
-    } finally {
-      await this.ctx.storage.setAlarm(Date.now() + ChatRoom.PUBLIC_CLEANUP_INTERVAL_MS);
-    }
-  }
-
   async initialize() {
     this.ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, created_at INTEGER NOT NULL, avatar TEXT NOT NULL DEFAULT '👤', role TEXT NOT NULL DEFAULT 'user', is_starred INTEGER NOT NULL DEFAULT 0, is_blocked INTEGER NOT NULL DEFAULT 0, is_crowned INTEGER NOT NULL DEFAULT 0, is_diamond INTEGER NOT NULL DEFAULT 0, is_vip INTEGER NOT NULL DEFAULT 0);
@@ -82,6 +63,7 @@ export class ChatRoom extends DurableObject {
       if (request.method === "GET" && url.pathname === "/admin") { const user = this.getSessionUser(request); if (!user) return json({ error: "برای ورود به پنل مدیریت ابتدا وارد حساب شو." }, 401); if (user.role !== "admin") return json({ error: "دسترسی غیرمجاز." }, 403); return json({ ok: true, admin: user.username }); }
       if (request.method === "GET" && url.pathname === "/admin/announcement") { const admin = this.getAdminUser(request); if (!admin) return json({ error: "دسترسی غیرمجاز." }, 403); const fallback = "لطفاً در دورهمی به یکدیگر احترام بگذارید؛ هرگونه فحاشی و توهین باعث مسدود شدن کاربر خواهد شد. در صورت مشاهده تخلف، موضوع را به مدیریت گزارش کنید. ✦"; const rows = this.ctx.storage.sql.exec("SELECT value FROM site_settings WHERE key = ? LIMIT 1", "announcement_text").toArray(); return json({ ok: true, text: (rows.length ? String(rows[0].value || "").trim() : "") || fallback }); }
       if (request.method === "POST" && url.pathname === "/admin/announcement") { const admin = this.getAdminUser(request); if (!admin) return json({ error: "دسترسی غیرمجاز." }, 403); const body = await request.json().catch(() => ({})); const text = String(body.text || "").trim(); if (!text) return json({ error: "متن تابلو نمی‌تواند خالی باشد." }, 400); if (text.length > 1000) return json({ error: "متن تابلو حداکثر ۱۰۰۰ کاراکتر باشد." }, 400); this.ctx.storage.sql.exec("INSERT INTO site_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at", "announcement_text", text, Date.now()); return json({ ok: true, text }); }
+      if (request.method === "POST" && url.pathname === "/admin/clear-public-messages") { const admin = this.getAdminUser(request); if (!admin) return json({ error: "دسترسی غیرمجاز." }, 403); const result = this.ctx.storage.sql.exec("DELETE FROM messages"); return json({ ok: true, deleted: Number(result.rowsWritten || 0) }); }
 
       if (request.method === "GET" && url.pathname === "/profile/me") { const username = this.getSessionUsername(request); if (!username) return json({ error: "برای دریافت هویت حساب باید وارد حساب خودت باشی." }, 401); const rows = this.ctx.storage.sql.exec("SELECT username, is_vip FROM users WHERE username = ? LIMIT 1", username).toArray(); return json({ ok: true, username, is_vip: rows.length ? Number(rows[0].is_vip || 0) : 0 }); }
       if (request.method === "GET" && url.pathname === "/vip/status") { const username = this.getSessionUsername(request); if (!username) return json({ error: "برای دریافت وضعیت VIP باید وارد حساب خودت باشی." }, 401); const rows = this.ctx.storage.sql.exec("SELECT is_vip FROM users WHERE username = ? LIMIT 1", username).toArray(); return json({ ok: true, username, is_vip: rows.length ? Number(rows[0].is_vip || 0) : 0 }); }
@@ -159,4 +141,4 @@ export class ChatRoom extends DurableObject {
   }
 }
 
-export default { async fetch(request, env) { const url = new URL(request.url); const apiPaths = new Set(["/health","/announcement","/register","/login","/profile","/profile/me","/vip/status","/users","/presence","/typing","/messages","/reactions","/private-messages","/private-unread","/private-read","/voice/upload","/voice","/admin","/admin/announcement","/admin/user-vip","/admin/user-star","/admin/user-crown","/admin/user-diamond","/admin/user-block","/rooms/create","/rooms/mine","/rooms/join","/rooms/info","/rooms/messages","/rooms/kick","/rooms/leave","/rooms/delete"]); if (apiPaths.has(url.pathname)) { try { const id = env.CHAT_ROOM.idFromName("public-room"); return await env.CHAT_ROOM.get(id).fetch(request); } catch (error) { return json({ error: "اتصال سرور برقرار نشد.", detail: String(error?.message || error) }, 500); } } return env.ASSETS.fetch(request); } };
+export default { async fetch(request, env) { const url = new URL(request.url); const apiPaths = new Set(["/health","/announcement","/register","/login","/profile","/profile/me","/vip/status","/users","/presence","/typing","/messages","/reactions","/private-messages","/private-unread","/private-read","/voice/upload","/voice","/admin","/admin/announcement","/admin/clear-public-messages","/admin/user-vip","/admin/user-star","/admin/user-crown","/admin/user-diamond","/admin/user-block","/rooms/create","/rooms/mine","/rooms/join","/rooms/info","/rooms/messages","/rooms/kick","/rooms/leave","/rooms/delete"]); if (apiPaths.has(url.pathname)) { try { const id = env.CHAT_ROOM.idFromName("public-room"); return await env.CHAT_ROOM.get(id).fetch(request); } catch (error) { return json({ error: "اتصال سرور برقرار نشد.", detail: String(error?.message || error) }, 500); } } return env.ASSETS.fetch(request); } };
