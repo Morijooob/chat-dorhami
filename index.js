@@ -83,6 +83,11 @@ export class ChatRoom extends DurableObject {
         created_at INTEGER NOT NULL,
         PRIMARY KEY (message_key, username, emoji)
       );
+      CREATE TABLE IF NOT EXISTS site_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
       CREATE INDEX IF NOT EXISTS sessions_username ON sessions(username);
       CREATE INDEX IF NOT EXISTS messages_created_at ON messages(created_at);
       CREATE INDEX IF NOT EXISTS private_messages_pair ON private_messages(sender, recipient, id);
@@ -149,11 +154,41 @@ export class ChatRoom extends DurableObject {
         return json({ ok: true, server: true, database: true });
       }
 
+      if (request.method === "GET" && url.pathname === "/announcement") {
+        const fallback = "لطفاً در دورهمی به یکدیگر احترام بگذارید؛ هرگونه فحاشی و توهین باعث مسدود شدن کاربر خواهد شد. در صورت مشاهده تخلف، موضوع را به مدیریت گزارش کنید. ✦";
+        const rows = this.ctx.storage.sql.exec("SELECT value FROM site_settings WHERE key = ? LIMIT 1", "announcement_text").toArray();
+        const text = rows.length ? String(rows[0].value || "").trim() : "";
+        return json({ ok: true, text: text || fallback });
+      }
+
       if (request.method === "GET" && url.pathname === "/admin") {
         const user = this.getSessionUser(request);
         if (!user) return json({ error: "برای ورود به پنل مدیریت ابتدا وارد حساب شو." }, 401);
         if (user.role !== "admin") return json({ error: "دسترسی غیرمجاز." }, 403);
         return json({ ok: true, admin: user.username });
+      }
+
+      if (request.method === "GET" && url.pathname === "/admin/announcement") {
+        const admin = this.getAdminUser(request);
+        if (!admin) return json({ error: "دسترسی غیرمجاز." }, 403);
+        const fallback = "لطفاً در دورهمی به یکدیگر احترام بگذارید؛ هرگونه فحاشی و توهین باعث مسدود شدن کاربر خواهد شد. در صورت مشاهده تخلف، موضوع را به مدیریت گزارش کنید. ✦";
+        const rows = this.ctx.storage.sql.exec("SELECT value FROM site_settings WHERE key = ? LIMIT 1", "announcement_text").toArray();
+        const text = rows.length ? String(rows[0].value || "").trim() : "";
+        return json({ ok: true, text: text || fallback });
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/announcement") {
+        const admin = this.getAdminUser(request);
+        if (!admin) return json({ error: "دسترسی غیرمجاز." }, 403);
+        const body = await request.json().catch(() => ({}));
+        const text = String(body.text || "").trim();
+        if (!text) return json({ error: "متن تابلو نمی‌تواند خالی باشد." }, 400);
+        if (text.length > 1000) return json({ error: "متن تابلو حداکثر ۱۰۰۰ کاراکتر باشد." }, 400);
+        this.ctx.storage.sql.exec(
+          "INSERT INTO site_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+          "announcement_text", text, Date.now()
+        );
+        return json({ ok: true, text });
       }
 
       if (request.method === "GET" && url.pathname === "/profile/me") {
@@ -432,7 +467,7 @@ export class ChatRoom extends DurableObject {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const apiPaths = new Set(["/health", "/register", "/login", "/profile", "/profile/me", "/users", "/presence", "/typing", "/messages", "/reactions", "/private-messages", "/private-unread", "/private-read", "/admin", "/admin/user-star", "/admin/user-crown", "/admin/user-diamond", "/admin/user-block"]);
+    const apiPaths = new Set(["/health", "/announcement", "/register", "/login", "/profile", "/profile/me", "/users", "/presence", "/typing", "/messages", "/reactions", "/private-messages", "/private-unread", "/private-read", "/admin", "/admin/announcement", "/admin/user-star", "/admin/user-crown", "/admin/user-diamond", "/admin/user-block"]);
     if (apiPaths.has(url.pathname)) {
       try {
         const id = env.CHAT_ROOM.idFromName("public-room");
