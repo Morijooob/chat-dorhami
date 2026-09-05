@@ -1,15 +1,15 @@
 name: Fix voice upload parser
 
 on:
-  issues:
-    types: [opened]
+  push:
+    branches: [main]
 
 permissions:
   contents: write
 
 jobs:
   fix:
-    if: startsWith(github.event.issue.title, 'VOICE_UPLOAD_FIX_')
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
