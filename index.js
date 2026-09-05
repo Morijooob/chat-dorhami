@@ -11,7 +11,7 @@ export class ChatRoom extends DurableObject {
 
   async initialize() {
     this.ctx.storage.sql.exec(`
-      CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, created_at INTEGER NOT NULL, avatar TEXT NOT NULL DEFAULT '👤', role TEXT NOT NULL DEFAULT 'user', is_starred INTEGER NOT NULL DEFAULT 0, is_blocked INTEGER NOT NULL DEFAULT 0, is_crowned INTEGER NOT NULL DEFAULT 0, is_diamond INTEGER NOT NULL DEFAULT 0, is_vip INTEGER NOT NULL DEFAULT 0, flowers INTEGER NOT NULL DEFAULT 0, last_activity_reward INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, created_at INTEGER NOT NULL, avatar TEXT NOT NULL DEFAULT '👤', role TEXT NOT NULL DEFAULT 'user', is_starred INTEGER NOT NULL DEFAULT 0, is_blocked INTEGER NOT NULL DEFAULT 0, is_crowned INTEGER NOT NULL DEFAULT 0, is_diamond INTEGER NOT NULL DEFAULT 0, is_vip INTEGER NOT NULL DEFAULT 0, flowers INTEGER NOT NULL DEFAULT 0, diamonds INTEGER NOT NULL DEFAULT 0, last_activity_reward INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, username TEXT NOT NULL, created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL, text TEXT NOT NULL, created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS private_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, sender TEXT NOT NULL, recipient TEXT NOT NULL, text TEXT NOT NULL, created_at INTEGER NOT NULL);
@@ -43,6 +43,7 @@ export class ChatRoom extends DurableObject {
     try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN is_diamond INTEGER NOT NULL DEFAULT 0"); } catch (error) {}
     try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN is_vip INTEGER NOT NULL DEFAULT 0"); } catch (error) {}
     try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN flowers INTEGER NOT NULL DEFAULT 0"); } catch (error) {}
+    try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN diamonds INTEGER NOT NULL DEFAULT 0"); } catch (error) {}
     try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN last_activity_reward INTEGER NOT NULL DEFAULT 0"); } catch (error) {}
   }
 
@@ -79,6 +80,27 @@ export class ChatRoom extends DurableObject {
         const nextFlowers = flowers + 10;
         this.ctx.storage.sql.exec("UPDATE users SET flowers = ?, last_activity_reward = ? WHERE username = ?", nextFlowers, now, username);
         return json({ ok: true, rewarded: true, flowers: nextFlowers, gift: 10 });
+      }
+
+      if (request.method === "GET" && url.pathname === "/wallet") {
+        const username = this.getSessionUsername(request);
+        if (!username) return json({ error: "برای دریافت موجودی باید وارد حساب خودت باشی." }, 401);
+        const rows = this.ctx.storage.sql.exec("SELECT flowers, diamonds FROM users WHERE username = ? LIMIT 1", username).toArray();
+        if (!rows.length) return json({ error: "کاربر پیدا نشد." }, 404);
+        return json({ ok: true, flowers: Number(rows[0].flowers || 0), diamonds: Number(rows[0].diamonds || 0) });
+      }
+
+      if (request.method === "POST" && url.pathname === "/store/convert") {
+        const username = this.getSessionUsername(request);
+        if (!username) return json({ error: "برای تبدیل گل باید وارد حساب خودت باشی." }, 401);
+        const body = await request.json().catch(() => ({}));
+        const flowerAmount = Number(body.flowers);
+        if (!Number.isInteger(flowerAmount) || flowerAmount < 5 || flowerAmount % 5 !== 0) return json({ error: "تعداد گل باید مضربی از ۵ باشد." }, 400);
+        const diamondAmount = flowerAmount / 5;
+        const result = this.ctx.storage.sql.exec("UPDATE users SET flowers = flowers - ?, diamonds = diamonds + ? WHERE username = ? AND flowers >= ?", flowerAmount, diamondAmount, username, flowerAmount);
+        if (!Number(result.rowsWritten || 0)) return json({ error: "موجودی گل برای این تبدیل کافی نیست." }, 400);
+        const rows = this.ctx.storage.sql.exec("SELECT flowers, diamonds FROM users WHERE username = ? LIMIT 1", username).toArray();
+        return json({ ok: true, convertedFlowers: flowerAmount, addedDiamonds: diamondAmount, flowers: Number(rows[0].flowers || 0), diamonds: Number(rows[0].diamonds || 0) });
       }
 
       if (request.method === "GET" && url.pathname === "/profile/me") { const username = this.getSessionUsername(request); if (!username) return json({ error: "برای دریافت هویت حساب باید وارد حساب خودت باشی." }, 401); const rows = this.ctx.storage.sql.exec("SELECT username, is_vip FROM users WHERE username = ? LIMIT 1", username).toArray(); return json({ ok: true, username, is_vip: rows.length ? Number(rows[0].is_vip || 0) : 0 }); }
@@ -157,4 +179,4 @@ export class ChatRoom extends DurableObject {
   }
 }
 
-export default { async fetch(request, env) { const url = new URL(request.url); const apiPaths = new Set(["/health","/announcement","/register","/login","/profile","/profile/me","/vip/status","/rewards/claim","/users","/presence","/typing","/messages","/reactions","/private-messages","/private-unread","/private-read","/voice/upload","/voice","/admin","/admin/announcement","/admin/clear-public-messages","/admin/user-vip","/admin/user-star","/admin/user-crown","/admin/user-diamond","/admin/user-block","/rooms/create","/rooms/mine","/rooms/join","/rooms/info","/rooms/messages","/rooms/kick","/rooms/leave","/rooms/delete"]); if (apiPaths.has(url.pathname)) { try { const id = env.CHAT_ROOM.idFromName("public-room"); return await env.CHAT_ROOM.get(id).fetch(request); } catch (error) { return json({ error: "اتصال سرور برقرار نشد.", detail: String(error?.message || error) }, 500); } } return env.ASSETS.fetch(request); } };
+export default { async fetch(request, env) { const url = new URL(request.url); const apiPaths = new Set(["/health","/announcement","/register","/login","/profile","/profile/me","/vip/status","/rewards/claim","/wallet","/store/convert","/users","/presence","/typing","/messages","/reactions","/private-messages","/private-unread","/private-read","/voice/upload","/voice","/admin","/admin/announcement","/admin/clear-public-messages","/admin/user-vip","/admin/user-star","/admin/user-crown","/admin/user-diamond","/admin/user-block","/rooms/create","/rooms/mine","/rooms/join","/rooms/info","/rooms/messages","/rooms/kick","/rooms/leave","/rooms/delete"]); if (apiPaths.has(url.pathname)) { try { const id = env.CHAT_ROOM.idFromName("public-room"); return await env.CHAT_ROOM.get(id).fetch(request); } catch (error) { return json({ error: "اتصال سرور برقرار نشد.", detail: String(error?.message || error) }, 500); } } return env.ASSETS.fetch(request); } };
