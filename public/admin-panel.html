@@ -18,9 +18,17 @@
     .card{display:block;padding:18px;border:1px solid rgba(255,255,255,.08);border-radius:17px;background:rgba(255,255,255,.035);color:#fff;text-decoration:none;transition:.18s ease}
     .card:hover{transform:translateY(-2px);border-color:rgba(255,255,255,.18);background:rgba(255,255,255,.06)}
     .card b{display:block;font-size:13px;margin-bottom:7px}.card span{color:#64748b;font-size:10px}
+    .board-card{grid-column:1/-1}
+    .board-editor{margin-top:14px}
+    .board-editor textarea{width:100%;min-height:110px;resize:vertical;padding:12px 14px;border:1px solid rgba(251,191,36,.25);border-radius:14px;background:rgba(0,0,0,.18);color:#fff;font:700 12px/2 Tahoma,Arial,sans-serif;outline:none}
+    .board-editor textarea:focus{border-color:rgba(251,191,36,.6);box-shadow:0 0 0 3px rgba(251,191,36,.08)}
+    .board-actions{display:flex;align-items:center;gap:10px;margin-top:10px}
+    .save-board{border:0;border-radius:12px;padding:10px 16px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#111827;font:900 11px Tahoma,Arial,sans-serif;cursor:pointer}
+    .save-board:disabled{opacity:.6;cursor:wait}
+    .board-status{font-size:10px;color:#94a3b8}
     .loading{text-align:center;color:#94a3b8;font-size:11px;padding:20px}
     .error{display:none;padding:16px;border-radius:14px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);color:#fecaca;font-size:11px;line-height:1.9}
-    @media(max-width:600px){body{padding:14px}.head{align-items:flex-start}.cards{grid-template-columns:1fr}.panel{padding:18px}}
+    @media(max-width:600px){body{padding:14px}.head{align-items:flex-start}.cards{grid-template-columns:1fr}.board-card{grid-column:auto}.panel{padding:18px}}
   </style>
 </head>
 <body>
@@ -35,6 +43,7 @@
       <div id="content" hidden>
         <div class="cards">
           <a class="card" href="/admin-users.html"><b>👥 کاربران</b><span>مشاهده و جستجوی کاربران ثبت‌نام‌شده.</span></a>
+          <div class="card board-card"><b>📢 مدیریت تابلو</b><span>متن تابلو را اینجا بنویس؛ کاربران همان متن را به‌صورت متحرک در صفحه اصلی می‌بینند.</span><div class="board-editor"><textarea id="announcementText" maxlength="1000" placeholder="متن تابلو را بنویس..."></textarea><div class="board-actions"><button class="save-board" id="saveAnnouncement" type="button">💾 ذخیره تابلو</button><span class="board-status" id="boardStatus"></span></div></div></div>
           <div class="card"><b>🟢 وضعیت آنلاین</b><span>آمار آنلاین‌ها در مرحله بعد اضافه می‌شود.</span></div>
           <div class="card"><b>🚫 مسدودسازی</b><span>فعلاً غیرفعال — هیچ عملیات حساسی فعال نیست.</span></div>
           <div class="card"><b>📊 آمار کلی</b><span>داشبورد آماری در مرحله بعد ساخته می‌شود.</span></div>
@@ -44,23 +53,47 @@
     </section>
   </main>
   <script>
-    fetch('/admin', {credentials:'same-origin', cache:'no-store'})
-      .then(async response => {
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || 'دسترسی به پنل مدیریت امکان‌پذیر نیست.');
-        return data;
-      })
-      .then(data => {
-        document.querySelector('#loading').hidden = true;
-        document.querySelector('#content').hidden = false;
-        document.querySelector('#adminStatus').textContent = 'دسترسی مدیر تأیید شد • ' + String(data.admin || 'مدیر');
+    const $ = selector => document.querySelector(selector);
+    async function api(url, options={}) {
+      const response = await fetch(url, {credentials:'same-origin', cache:'no-store', ...options});
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'خطا در ارتباط با سرور.');
+      return data;
+    }
+    async function loadAnnouncement() {
+      const data = await api('/admin/announcement');
+      $('#announcementText').value = String(data.text || '');
+    }
+    $('#saveAnnouncement').addEventListener('click', async () => {
+      const button = $('#saveAnnouncement');
+      const status = $('#boardStatus');
+      const text = $('#announcementText').value.trim();
+      if (!text) { status.textContent = 'متن تابلو خالی است.'; return; }
+      button.disabled = true;
+      status.textContent = 'در حال ذخیره…';
+      try {
+        const data = await api('/admin/announcement', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({text})});
+        $('#announcementText').value = String(data.text || text);
+        status.textContent = '✅ تابلو با موفقیت ذخیره شد.';
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+    api('/admin')
+      .then(async data => {
+        $('#loading').hidden = true;
+        $('#content').hidden = false;
+        $('#adminStatus').textContent = 'دسترسی مدیر تأیید شد • ' + String(data.admin || 'مدیر');
+        try { await loadAnnouncement(); } catch (error) { $('#boardStatus').textContent = error.message; }
       })
       .catch(error => {
-        document.querySelector('#loading').hidden = true;
-        const box = document.querySelector('#error');
+        $('#loading').hidden = true;
+        const box = $('#error');
         box.textContent = error.message;
         box.style.display = 'block';
-        document.querySelector('#adminStatus').textContent = 'دسترسی تأیید نشد';
+        $('#adminStatus').textContent = 'دسترسی تأیید نشد';
       });
   </script>
 </body>
