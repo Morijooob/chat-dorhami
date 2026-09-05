@@ -43,7 +43,8 @@ export class ChatRoom extends DurableObject {
         created_at INTEGER NOT NULL,
         avatar TEXT NOT NULL DEFAULT '👤',
         role TEXT NOT NULL DEFAULT 'user',
-        is_starred INTEGER NOT NULL DEFAULT 0
+        is_starred INTEGER NOT NULL DEFAULT 0,
+        is_blocked INTEGER NOT NULL DEFAULT 0
       );
       CREATE TABLE IF NOT EXISTS sessions (
         token TEXT PRIMARY KEY,
@@ -91,6 +92,7 @@ export class ChatRoom extends DurableObject {
     try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN avatar TEXT NOT NULL DEFAULT '👤'"); } catch (error) {}
     try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"); } catch (error) {}
     try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN is_starred INTEGER NOT NULL DEFAULT 0"); } catch (error) {}
+    try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0"); } catch (error) {}
   }
 
   createSession(username) {
@@ -102,7 +104,7 @@ export class ChatRoom extends DurableObject {
   getSessionUsername(request) {
     const token = getCookie(request, "dorhami_session");
     if (!token) return "";
-    const rows = this.ctx.storage.sql.exec("SELECT username FROM sessions WHERE token = ? LIMIT 1", token).toArray();
+    const rows = this.ctx.storage.sql.exec("SELECT s.username FROM sessions s JOIN users u ON u.username = s.username WHERE s.token = ? AND u.is_blocked = 0 LIMIT 1", token).toArray();
     return rows.length ? String(rows[0].username || "").trim() : "";
   }
 
@@ -110,10 +112,10 @@ export class ChatRoom extends DurableObject {
     const token = getCookie(request, "dorhami_session");
     if (!token) return null;
     const rows = this.ctx.storage.sql.exec(
-      "SELECT u.username, u.role FROM sessions s JOIN users u ON u.username = s.username WHERE s.token = ? LIMIT 1",
+      "SELECT u.username, u.role, u.is_blocked FROM sessions s JOIN users u ON u.username = s.username WHERE s.token = ? LIMIT 1",
       token
     ).toArray();
-    if (!rows.length) return null;
+    if (!rows.length || Number(rows[0].is_blocked) === 1) return null;
     const username = String(rows[0].username || "").trim();
     return {
       username,
@@ -124,6 +126,13 @@ export class ChatRoom extends DurableObject {
   getAdminUser(request) {
     const user = this.getSessionUser(request);
     return user && user.role === "admin" ? user : null;
+  }
+
+  isUserBlocked(username) {
+    const name = String(username || "").trim();
+    if (!name) return false;
+    const rows = this.ctx.storage.sql.exec("SELECT is_blocked FROM users WHERE username = ? LIMIT 1", name).toArray();
+    return rows.length && Number(rows[0].is_blocked) === 1;
   }
 
   async fetch(request) {
@@ -166,8 +175,9 @@ export class ChatRoom extends DurableObject {
         const body = await request.json();
         const username = String(body.username || "").trim();
         const password = String(body.password || "");
-        const rows = this.ctx.storage.sql.exec("SELECT username, password_hash, avatar FROM users WHERE username = ? LIMIT 1", username).toArray();
+        const rows = this.ctx.storage.sql.exec("SELECT username, password_hash, avatar, is_blocked FROM users WHERE username = ? LIMIT 1", username).toArray();
         if (!rows.length || rows[0].password_hash !== await hashPassword(password)) return json({ error: "نام کاربری یا رمز عبور اشتباه است." }, 401);
+        if (Number(rows[0].is_blocked) === 1) return json({ error: "این حساب توسط مدیریت مسدود شده است." }, 403);
         const token = this.createSession(rows[0].username);
         return json({ ok: true, username: rows[0].username, avatar: rows[0].avatar || "👤" }, 200, { "set-cookie": sessionCookie(token) });
       }
@@ -195,7 +205,7 @@ export class ChatRoom extends DurableObject {
       }
 
       if (request.method === "GET" && url.pathname === "/users") {
-        const rows = this.ctx.storage.sql.exec("SELECT username, avatar, is_starred FROM users ORDER BY username COLLATE NOCASE").toArray();
+        const rows = this.ctx.storage.sql.exec("SELECT username, avatar, is_starred, is_blocked FROM users ORDER BY username COLLATE NOCASE").toArray();
         return json({ ok: true, users: rows });
       }
 
@@ -212,10 +222,30 @@ export class ChatRoom extends DurableObject {
         return json({ ok: true, username, is_starred: starred ? 1 : 0 });
       }
 
+      if (request.method === "POST" && url.pathname === "/admin/user-block") {
+        const admin = this.getAdminUser(request);
+        if (!admin) return json({ error: "دسترسی غیرمجاز." }, 403);
+        const body = await request.json().catch(() => ({}));
+        const username = String(body.username || "").trim();
+        const blocked = Boolean(body.blocked);
+        if (!username || username.length > 24) return json({ error: "کاربر نامعتبر است." }, 400);
+        if (username === "Morteza2026") return json({ error: "حساب مدیر قابل مسدود کردن نیست." }, 400);
+        const exists = this.ctx.storage.sql.exec("SELECT username FROM users WHERE username = ? LIMIT 1", username).toArray();
+        if (!exists.length) return json({ error: "کاربر پیدا نشد." }, 404);
+        this.ctx.storage.sql.exec("UPDATE users SET is_blocked = ? WHERE username = ?", blocked ? 1 : 0, username);
+        if (blocked) {
+          this.ctx.storage.sql.exec("DELETE FROM sessions WHERE username = ?", username);
+          this.ctx.storage.sql.exec("DELETE FROM presence WHERE username = ?", username);
+          for (const key of [...this.typing.keys()]) if (key.endsWith(`|${username}`)) this.typing.delete(key);
+        }
+        return json({ ok: true, username, is_blocked: blocked ? 1 : 0 });
+      }
+
       if (url.pathname === "/presence" && request.method === "POST") {
         const body = await request.json();
         const username = String(body.username || "").trim();
         if (!username || username.length > 24) return json({ error: "کاربر نامعتبر است." }, 400);
+        if (this.isUserBlocked(username)) return json({ error: "این حساب توسط مدیریت مسدود شده است." }, 403);
         const now = Date.now();
         this.ctx.storage.sql.exec("INSERT INTO presence (username, last_seen) VALUES (?, ?) ON CONFLICT(username) DO UPDATE SET last_seen = excluded.last_seen", username, now);
         this.ctx.storage.sql.exec("DELETE FROM presence WHERE last_seen < ?", now - 30000);
@@ -242,6 +272,7 @@ export class ChatRoom extends DurableObject {
         const context = String(body.context || "public").trim();
         const isTyping = Boolean(body.typing);
         if (!username || username.length > 24 || !context || context.length > 80) return json({ error: "اطلاعات تایپ نامعتبر است." }, 400);
+        if (this.isUserBlocked(username)) return json({ error: "این حساب توسط مدیریت مسدود شده است." }, 403);
         const key = `${context}|${username}`;
         if (isTyping) this.typing.set(key, Date.now());
         else this.typing.delete(key);
@@ -258,7 +289,7 @@ export class ChatRoom extends DurableObject {
         for (const [key, time] of this.typing) {
           if (key.startsWith(prefix) && now - time <= 5000) {
             const name = key.slice(prefix.length);
-            if (name && name !== me) users.push(name);
+            if (name && name !== me && !this.isUserBlocked(name)) users.push(name);
           }
         }
         return json({ ok: true, users: [...new Set(users)] });
@@ -274,6 +305,7 @@ export class ChatRoom extends DurableObject {
         const username = String(body.username || "").trim();
         const text = String(body.text || "").trim();
         if (!username || !text || text.length > 1000) return json({ error: "پیام نامعتبر است." }, 400);
+        if (this.isUserBlocked(username)) return json({ error: "این حساب توسط مدیریت مسدود شده است." }, 403);
         const now = Date.now();
         this.ctx.storage.sql.exec("INSERT INTO messages (username, text, created_at) VALUES (?, ?, ?)", username, text, now);
         const row = this.ctx.storage.sql.exec("SELECT id, username, text, created_at FROM messages WHERE id = last_insert_rowid()").toArray()[0];
@@ -300,6 +332,7 @@ export class ChatRoom extends DurableObject {
         const emoji = String(body.emoji || "").trim();
         const allowed = new Set(["❤️","😂","😍","👍","🔥"]);
         if (!messageKey || messageKey.length > 160 || !username || username.length > 24 || !allowed.has(emoji)) return json({ error: "واکنش نامعتبر است." }, 400);
+        if (this.isUserBlocked(username)) return json({ error: "این حساب توسط مدیریت مسدود شده است." }, 403);
         const existing = this.ctx.storage.sql.exec("SELECT 1 FROM message_reactions WHERE message_key = ? AND username = ? AND emoji = ? LIMIT 1", messageKey, username, emoji).toArray();
         if (existing.length) {
           this.ctx.storage.sql.exec("DELETE FROM message_reactions WHERE message_key = ? AND username = ? AND emoji = ?", messageKey, username, emoji);
@@ -316,6 +349,7 @@ export class ChatRoom extends DurableObject {
         const me = String(url.searchParams.get("me") || "").trim();
         const withUser = String(url.searchParams.get("with") || "").trim();
         if (!me || !withUser || me === withUser) return json({ error: "گفتگوی خصوصی نامعتبر است." }, 400);
+        if (this.isUserBlocked(me)) return json({ error: "این حساب توسط مدیریت مسدود شده است." }, 403);
         const rows = this.ctx.storage.sql.exec("SELECT id, sender, recipient, text, created_at FROM private_messages WHERE (sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?) ORDER BY id ASC LIMIT 200", me, withUser, withUser, me).toArray();
         return json({ ok: true, messages: rows });
       }
@@ -326,6 +360,8 @@ export class ChatRoom extends DurableObject {
         const recipient = String(body.recipient || "").trim();
         const text = String(body.text || "").trim();
         if (!sender || !recipient || sender === recipient || !text || text.length > 1000) return json({ error: "پیام خصوصی نامعتبر است." }, 400);
+        if (this.isUserBlocked(sender)) return json({ error: "این حساب توسط مدیریت مسدود شده است." }, 403);
+        if (this.isUserBlocked(recipient)) return json({ error: "این کاربر توسط مدیریت مسدود شده است." }, 403);
         const user = this.ctx.storage.sql.exec("SELECT username FROM users WHERE username = ? LIMIT 1", recipient).toArray();
         if (!user.length) return json({ error: "این کاربر پیدا نشد." }, 404);
         const now = Date.now();
@@ -337,6 +373,7 @@ export class ChatRoom extends DurableObject {
       if (url.pathname === "/private-unread" && request.method === "GET") {
         const me = String(url.searchParams.get("me") || "").trim();
         if (!me) return json({ error: "کاربر نامعتبر است." }, 400);
+        if (this.isUserBlocked(me)) return json({ error: "این حساب توسط مدیریت مسدود شده است." }, 403);
         const rows = this.ctx.storage.sql.exec(`SELECT pm.sender, COUNT(*) AS count, MAX(pm.id) AS latest_id FROM private_messages pm LEFT JOIN private_reads pr ON pr.username = ? AND pr.other_user = pm.sender WHERE pm.recipient = ? AND pm.id > COALESCE(pr.last_read_id, 0) GROUP BY pm.sender ORDER BY latest_id DESC`, me, me).toArray();
         const total = rows.reduce((sum, row) => sum + Number(row.count || 0), 0);
         return json({ ok: true, total, users: rows });
@@ -348,6 +385,7 @@ export class ChatRoom extends DurableObject {
         const otherUser = String(body.otherUser || "").trim();
         const lastReadId = Number(body.lastReadId || 0);
         if (!username || !otherUser || username === otherUser || !Number.isFinite(lastReadId) || lastReadId < 0) return json({ error: "اطلاعات خواندن نامعتبر است." }, 400);
+        if (this.isUserBlocked(username)) return json({ error: "این حساب توسط مدیریت مسدود شده است." }, 403);
         this.ctx.storage.sql.exec(`INSERT INTO private_reads (username, other_user, last_read_id) VALUES (?, ?, ?) ON CONFLICT(username, other_user) DO UPDATE SET last_read_id = MAX(last_read_id, excluded.last_read_id)`, username, otherUser, Math.floor(lastReadId));
         return json({ ok: true });
       }
@@ -362,7 +400,7 @@ export class ChatRoom extends DurableObject {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const apiPaths = new Set(["/health", "/register", "/login", "/profile", "/profile/me", "/users", "/presence", "/typing", "/messages", "/reactions", "/private-messages", "/private-unread", "/private-read", "/admin", "/admin/user-star"]);
+    const apiPaths = new Set(["/health", "/register", "/login", "/profile", "/profile/me", "/users", "/presence", "/typing", "/messages", "/reactions", "/private-messages", "/private-unread", "/private-read", "/admin", "/admin/user-star", "/admin/user-block"]);
     if (apiPaths.has(url.pathname)) {
       try {
         const id = env.CHAT_ROOM.idFromName("public-room");
