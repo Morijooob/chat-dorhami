@@ -41,7 +41,7 @@ jobs:
           if 'id="clearPublicMessages"' not in p: p = p.replace(anchor, cleanup_card + anchor, 1)
           css_anchor = '    .loading{text-align:center;color:#94a3b8;font-size:11px;padding:20px}\n'
           css = '    .cleanup-actions{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}\n    .clear-public{border:0;border-radius:12px;padding:10px 16px;background:linear-gradient(135deg,#ef4444,#b91c1c);color:#fff;font:900 11px Tahoma,Arial,sans-serif;cursor:pointer}\n    .clear-public:disabled{opacity:.6;cursor:wait}\n    .cleanup-status{font-size:10px;color:#94a3b8}\n'
-          if 'class="clear-public"' not in p:
+          if '.clear-public{' not in p:
               if css_anchor not in p: raise SystemExit('Admin panel CSS anchor not found; stopping safely.')
               p = p.replace(css_anchor, css + css_anchor, 1)
           script_marker = "    api('/admin')"
