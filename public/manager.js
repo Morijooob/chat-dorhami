@@ -28,6 +28,7 @@
 
   let verifiedManager = false;
   let lastKnownUser = '';
+  let vipActivationInFlight = false;
 
   function currentLocalUser() {
     return String(localStorage.getItem('dorhami_user') || '').trim();
@@ -85,29 +86,34 @@
   }
 
   async function makeManagerVip() {
-    if (!verifiedManager) return;
+    if (!verifiedManager || vipActivationInFlight) return;
+    vipActivationInFlight = true;
     try {
       await fetch('/admin/user-vip', {
         method: 'POST',
         headers: {'content-type':'application/json'},
         body: JSON.stringify({username: MANAGER, is_vip: 1})
       });
-    } catch (_) {}
+    } catch (_) {} finally {
+      vipActivationInFlight = false;
+    }
   }
 
   async function refreshIdentityAndDecorate() {
     const localUser = currentLocalUser();
     if (localUser !== MANAGER) {
       verifiedManager = false;
+      lastKnownUser = localUser;
       clearManagerDecorations();
       return;
     }
-    if (lastKnownUser !== MANAGER) await verifyManager();
+    if (lastKnownUser !== MANAGER || !verifiedManager) await verifyManager();
     if (!verifiedManager) {
       clearManagerDecorations();
       return;
     }
     decorateOwnProfile();
+    makeManagerVip();
   }
 
   async function start() {
