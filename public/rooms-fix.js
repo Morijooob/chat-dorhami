@@ -1,11 +1,12 @@
 (()=>{
   const api=async(path,options={})=>{const r=await fetch(path,{...options,headers:{'content-type':'application/json',...(options.headers||{})},cache:'no-store'});const d=await r.json().catch(()=>({error:'پاسخ نامعتبر از سرور'}));if(!r.ok)throw new Error(d.error||'خطایی رخ داد');return d};
-  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const esc=v=>String(v??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
   const style=()=>{if(document.getElementById('dorhamiRoomsFixStyle'))return;const s=document.createElement('style');s.id='dorhamiRoomsFixStyle';s.textContent=`.dorhami-home-rooms{margin:0 0 10px;padding:10px;border:1px solid rgba(250,204,21,.22);border-radius:14px;background:linear-gradient(135deg,rgba(250,204,21,.08),rgba(124,58,237,.08));direction:rtl}.dorhami-home-rooms-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}.dorhami-home-rooms-head b{font-size:11px}.dorhami-home-rooms-head small{font-size:9px;color:#94a3b8}.dorhami-home-room-list{display:flex;gap:7px;overflow:auto;padding-bottom:2px}.dorhami-home-room{flex:0 0 auto;border:1px solid rgba(255,255,255,.09);border-radius:11px;padding:8px 10px;background:rgba(255,255,255,.045);color:#fff;cursor:pointer;text-align:right;min-width:130px}.dorhami-home-room b{display:block;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dorhami-home-room small{display:block;margin-top:3px;color:#aab4cc;font-size:8px}.dorhami-room-share-link{display:block;margin:6px 14px 10px;padding:8px 10px;border-radius:10px;background:rgba(250,204,21,.07);border:1px dashed rgba(250,204,21,.28);color:#fde68a!important;font-size:10px;word-break:break-all;text-decoration:none}.dorhami-room-share-link:hover{background:rgba(250,204,21,.13)}.dorhami-room-copy-link{margin-right:6px!important}`;document.head.appendChild(s)};
   function isChatVisible(){const el=document.getElementById('chatView');return !!el&&!el.classList.contains('hidden')}
   function roomUrl(code){return `${location.origin}/?join=${encodeURIComponent(code)}`}
   async function openRoomViaUi(roomId){
-    const selector=`[data-room-open="${CSS.escape(roomId)}"]`;const existing=document.querySelector(selector);if(existing){existing.click();return}
+    const selector=`[data-room-open=\"${CSS.escape(roomId)}\"]`;const existing=document.querySelector(selector);if(existing){existing.click();return}
+    if(typeof window.dorhamiOpenRoom==='function'){await window.dorhamiOpenRoom(roomId);return}
     document.getElementById('dorhamiRoomChat')?.remove();document.getElementById('dorhamiRoomsModal')?.remove();
     const vip=document.getElementById('dorhamiVipButton');if(!vip)return;vip.click();
     for(let i=0;i<30;i++){await new Promise(r=>setTimeout(r,100));const btn=document.getElementById('dorhamiOpenRooms');if(btn){btn.click();break}}
