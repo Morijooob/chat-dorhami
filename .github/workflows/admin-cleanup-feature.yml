@@ -46,7 +46,7 @@ jobs:
               p = p.replace(css_anchor, css + css_anchor, 1)
           script_marker = "    api('/admin')"
           script = '''    $('#clearPublicMessages').addEventListener('click', async () => {\n      const button = $('#clearPublicMessages');\n      const status = $('#cleanupStatus');\n      const confirmed = confirm('مطمئنی می‌خواهی تمام پیام‌های گروه عمومی پاک شوند؟\\n\\nپیام‌های خصوصی و اتاق‌های VIP پاک نمی‌شوند.');\n      if (!confirmed) return;\n      button.disabled = true;\n      status.textContent = 'در حال پاک‌سازی…';\n      try {\n        const data = await api('/admin/clear-public-messages', {method:'POST'});\n        status.textContent = '✅ ' + String(data.deleted || 0) + ' پیام گروه پاک شد.';\n      } catch (error) {\n        status.textContent = error.message;\n      } finally {\n        button.disabled = false;\n      }\n    });\n'''
-          if 'id="clearPublicMessages"' in p and "api('/admin/clear-public-messages' not in p:
+          if 'id="clearPublicMessages"' in p and "api('/admin/clear-public-messages')" not in p:
               if script_marker not in p: raise SystemExit('Admin panel script anchor not found; stopping safely.')
               p = p.replace(script_marker, script + script_marker, 1)
           panel.write_text(p, encoding='utf-8')
