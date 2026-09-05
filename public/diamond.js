@@ -45,6 +45,66 @@
     });
   };
 
+  const openAdminPrivateChat = async (packageText, status) => {
+    const admin = 'Morteza2026';
+    try {
+      const trigger = document.getElementById('usersTrigger');
+      const panel = document.getElementById('userPanel');
+      const search = document.getElementById('userSearch');
+      if (!trigger || !panel || !search) throw new Error('بخش کاربران در دسترس نیست.');
+      if (panel.classList.contains('hidden')) trigger.click();
+      search.value = admin;
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise(resolve => setTimeout(resolve, 180));
+      const target = [...panel.querySelectorAll('.user-item')].find(button => String(button.dataset.user || '').trim() === admin);
+      if (!target) throw new Error('کاربر مدیریت پیدا نشد.');
+      target.click();
+      await new Promise(resolve => setTimeout(resolve, 180));
+      const messageInput = document.getElementById('messageInput');
+      if (messageInput) {
+        messageInput.value = `سلام مدیریت، درخواست خرید ${packageText} را دارم. لطفاً راهنمایی پرداخت را اعلام کنید.`;
+        messageInput.focus();
+      }
+      if (status) status.textContent = '✅ گفتگوی خصوصی با مدیریت باز شد؛ پیام آماده ارسال است.';
+    } catch (error) {
+      if (status) status.textContent = `❌ ${error.message}`;
+    }
+  };
+
+  const installDiamondStore = (modal, products) => {
+    if (!modal || !products || modal.dataset.diamondPurchaseReady === '1') return;
+    modal.dataset.diamondPurchaseReady = '1';
+
+    const product = document.createElement('div');
+    product.className = 'dorhami-store-product dorhami-diamond-store-product';
+    product.innerHTML = `
+      <div class="dorhami-store-product-title">💎 خرید الماس</div>
+      <div class="dorhami-store-product-note">پرداخت به مدیریت؛ سپس حساب شما دستی شارژ می‌شود.</div>
+      <div class="dorhami-diamond-plans">
+        <button type="button" class="dorhami-diamond-plan" data-diamond-amount="50" data-diamond-price="49000">
+          <span>💎 50 الماس</span><b>49,000 تومان</b>
+        </button>
+        <button type="button" class="dorhami-diamond-plan" data-diamond-amount="100" data-diamond-price="90000">
+          <span>💎 100 الماس</span><b>90,000 تومان</b>
+        </button>
+      </div>
+      <div class="dorhami-diamond-status"></div>`;
+    products.appendChild(product);
+
+    const status = product.querySelector('.dorhami-diamond-status');
+    product.querySelectorAll('[data-diamond-amount]').forEach(button => {
+      button.addEventListener('click', () => {
+        const amount = Number(button.dataset.diamondAmount);
+        const price = Number(button.dataset.diamondPrice);
+        if (!amount || !price) return;
+        product.querySelectorAll('button').forEach(b => b.disabled = true);
+        status.textContent = `در حال آماده‌سازی درخواست ${amount} الماس…`;
+        openAdminPrivateChat(`${amount} 💎 به مبلغ ${price.toLocaleString('fa-IR')} تومان`, status)
+          .finally(() => product.querySelectorAll('button').forEach(b => b.disabled = false));
+      });
+    });
+  };
+
   const installVipStore = (modal) => {
     if (!modal || modal.dataset.vipPurchaseReady === '1') return;
     const products = modal.querySelector('.dorhami-store-products');
@@ -98,6 +158,8 @@
         }
       };
     });
+
+    installDiamondStore(modal, products);
   };
 
   const start = () => {
@@ -114,7 +176,7 @@
   };
 
   const style = document.createElement('style');
-  style.textContent = `.${DIAMOND_CLASS}{display:inline-block;margin-inline-start:4px;font-size:.9em;line-height:1;vertical-align:middle}.dorhami-vip-plans{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}.dorhami-vip-plan{display:flex;align-items:center;justify-content:space-between;gap:5px;padding:7px 8px;border:1px solid rgba(250,204,21,.2);border-radius:10px;background:rgba(250,204,21,.07);color:#fff;cursor:pointer;font:inherit;font-size:9px}.dorhami-vip-plan:hover{background:rgba(250,204,21,.14);transform:translateY(-1px)}.dorhami-vip-plan:disabled{opacity:.55;cursor:wait}.dorhami-vip-plan b{color:#67e8f9;white-space:nowrap}.dorhami-vip-purchase-status{margin-top:7px;min-height:18px;color:#cbd5e1;font-size:8px;line-height:1.7}@media(max-width:650px){.dorhami-vip-plans{grid-template-columns:1fr 1fr}}`;
+  style.textContent = `.${DIAMOND_CLASS}{display:inline-block;margin-inline-start:4px;font-size:.9em;line-height:1;vertical-align:middle}.dorhami-vip-plans{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}.dorhami-vip-plan{display:flex;align-items:center;justify-content:space-between;gap:5px;padding:7px 8px;border:1px solid rgba(250,204,21,.2);border-radius:10px;background:rgba(250,204,21,.07);color:#fff;cursor:pointer;font:inherit;font-size:9px}.dorhami-vip-plan:hover{background:rgba(250,204,21,.14);transform:translateY(-1px)}.dorhami-vip-plan:disabled{opacity:.55;cursor:wait}.dorhami-vip-plan b{color:#67e8f9;white-space:nowrap}.dorhami-vip-purchase-status{margin-top:7px;min-height:18px;color:#cbd5e1;font-size:8px;line-height:1.7}.dorhami-diamond-store-product{margin-top:10px}.dorhami-diamond-store-product-title{font-size:12px;font-weight:900;color:#67e8f9}.dorhami-store-product-note{margin-top:4px;color:#94a3b8;font-size:8px;line-height:1.7}.dorhami-diamond-plans{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}.dorhami-diamond-plan{display:flex;align-items:center;justify-content:space-between;gap:5px;padding:8px;border:1px solid rgba(103,232,249,.2);border-radius:10px;background:rgba(34,211,238,.06);color:#fff;cursor:pointer;font:inherit;font-size:9px}.dorhami-diamond-plan:hover{background:rgba(34,211,238,.12);transform:translateY(-1px)}.dorhami-diamond-plan:disabled{opacity:.55;cursor:wait}.dorhami-diamond-plan b{color:#fbbf24;white-space:nowrap}.dorhami-diamond-status{margin-top:7px;min-height:18px;color:#cbd5e1;font-size:8px;line-height:1.7}@media(max-width:650px){.dorhami-vip-plans,.dorhami-diamond-plans{grid-template-columns:1fr 1fr}}`;
   document.head.appendChild(style);
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
