@@ -1,6 +1,9 @@
 (() => {
   const KEY = 'dorhami_profile_bio';
   const getBio = () => String(localStorage.getItem(KEY) || '').trim();
+  let serverUsername = '';
+  let identityReady = false;
+  let identityPromise = null;
 
   const style = document.createElement('style');
   style.textContent = `
@@ -15,6 +18,66 @@
     .profile-editor-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}.profile-editor-actions button{padding:10px;border:0;border-radius:12px;color:#fff;font-weight:800;cursor:pointer}.profile-editor-save{background:linear-gradient(135deg,#7c3aed,#6366f1)}.profile-editor-cancel{background:rgba(255,255,255,.08)}
   `;
   document.head.appendChild(style);
+
+  const refreshProfile = () => {
+    const profile = document.querySelector('#profilePopover');
+    if (!profile) return;
+    const name = String(profile.querySelector('#profileUsername')?.textContent || '').trim();
+    if (!name || name === 'کاربر') return;
+    const isMine = identityReady && !!serverUsername && name === serverUsername;
+    let bio = profile.querySelector('.profile-bio');
+    if (!bio) {
+      bio = document.createElement('div'); bio.className = 'profile-bio';
+      const actions = profile.querySelector('.profile-actions');
+      (actions || profile.querySelector('.profile-private-btn') || profile.querySelector('.profile-hint'))?.before(bio);
+    }
+    const value = isMine ? getBio() : '';
+    const display = value || (isMine ? 'هنوز معرفی کوتاهی ننوشتی ✨' : '');
+    if (bio.textContent !== display) bio.textContent = display;
+    const shouldBeEmpty = !value;
+    if (bio.classList.contains('empty') !== shouldBeEmpty) bio.classList.toggle('empty', shouldBeEmpty);
+    let edit = profile.querySelector('.profile-edit-btn');
+    if (isMine) {
+      if (!edit) {
+        edit = document.createElement('button'); edit.type='button'; edit.className='profile-edit-btn'; edit.textContent='✏️ ویرایش معرفی پروفایل';
+        const actions = profile.querySelector('.profile-actions');
+        (actions || profile.querySelector('.profile-private-btn') || profile.querySelector('.profile-hint'))?.before(edit);
+        edit.addEventListener('click', async () => {
+          const me = await getServerUsername();
+          const currentName = String(profile.querySelector('#profileUsername')?.textContent || '').trim();
+          if (!me || currentName !== me) {
+            edit.classList.add('hidden');
+            return;
+          }
+          ensureEditor();
+          const editor = document.querySelector('#profileEditor');
+          document.querySelector('#profileBioInput').value = getBio();
+          editor.classList.remove('hidden');
+          setTimeout(() => document.querySelector('#profileBioInput')?.focus(), 30);
+        });
+      }
+      edit.classList.remove('hidden');
+    } else if (edit) edit.classList.add('hidden');
+  };
+
+  const getServerUsername = () => {
+    if (identityPromise) return identityPromise;
+    identityPromise = fetch('/profile/me', { credentials:'same-origin', cache:'no-store' })
+      .then(response => response.ok ? response.json() : null)
+      .then(data => {
+        serverUsername = String(data?.username || '').trim();
+        identityReady = true;
+        refreshProfile();
+        return serverUsername;
+      })
+      .catch(() => {
+        serverUsername = '';
+        identityReady = true;
+        refreshProfile();
+        return '';
+      });
+    return identityPromise;
+  };
 
   const ensureEditor = () => {
     if (document.querySelector('#profileEditor')) return;
@@ -32,47 +95,13 @@
     });
   };
 
-  const refreshProfile = () => {
-    const profile = document.querySelector('#profilePopover');
-    if (!profile) return;
-    const name = String(profile.querySelector('#profileUsername')?.textContent || '').trim();
-    const me = localStorage.getItem('dorhami_user') || '';
-    if (!name || name === 'کاربر') return;
-    let bio = profile.querySelector('.profile-bio');
-    if (!bio) {
-      bio = document.createElement('div'); bio.className = 'profile-bio';
-      const actions = profile.querySelector('.profile-actions');
-      (actions || profile.querySelector('.profile-private-btn') || profile.querySelector('.profile-hint'))?.before(bio);
-    }
-    const value = name === me ? getBio() : '';
-    const display = value || (name === me ? 'هنوز معرفی کوتاهی ننوشتی ✨' : '');
-    if (bio.textContent !== display) bio.textContent = display;
-    const shouldBeEmpty = !value;
-    if (bio.classList.contains('empty') !== shouldBeEmpty) bio.classList.toggle('empty', shouldBeEmpty);
-    let edit = profile.querySelector('.profile-edit-btn');
-    if (name === me) {
-      if (!edit) {
-        edit = document.createElement('button'); edit.type='button'; edit.className='profile-edit-btn'; edit.textContent='✏️ ویرایش معرفی پروفایل';
-        const actions = profile.querySelector('.profile-actions');
-        (actions || profile.querySelector('.profile-private-btn') || profile.querySelector('.profile-hint'))?.before(edit);
-        edit.addEventListener('click', () => {
-          ensureEditor();
-          const editor = document.querySelector('#profileEditor');
-          document.querySelector('#profileBioInput').value = getBio();
-          editor.classList.remove('hidden');
-          setTimeout(() => document.querySelector('#profileBioInput')?.focus(), 30);
-        });
-      }
-      edit.classList.remove('hidden');
-    } else if (edit) edit.classList.add('hidden');
-  };
-
   const observer = new MutationObserver(() => refreshProfile());
   const start = () => {
     const profile = document.querySelector('#profilePopover');
     if (!profile) return;
     observer.observe(profile, { childList:true, subtree:true, characterData:true });
     refreshProfile();
+    getServerUsername();
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, {once:true}); else start();
 })();
