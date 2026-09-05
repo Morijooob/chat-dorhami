@@ -1,7 +1,7 @@
 {
   "$schema": "https://unpkg.com/wrangler@latest/config-schema.json",
   "name": "chat-dorhami",
-  "main": "index.js",
+  "main": "worker.js",
   "compatibility_date": "2026-09-04",
   "durable_objects": {
     "bindings": [
