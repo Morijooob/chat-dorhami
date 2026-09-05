@@ -130,3 +130,4 @@
   const messages = document.getElementById('messages');
   if (messages) new MutationObserver(renderPlayers).observe(messages, { subtree: true, childList: true });
 })();
+// cache bump to trigger the one-time backend patch workflow
