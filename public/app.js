@@ -66,7 +66,7 @@ async function loadMyProfile() {
 }
 
 function escapeHtml(value) {
-  return String(value).replace(/[&<>'"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[c]));
+  return String(value).replace(/[&<>'\"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '\"':'&quot;' }[c]));
 }
 
 function openProfile(name) {
@@ -164,11 +164,59 @@ function showActivityRewardToast(text) {
   window.activityRewardToastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 2800);
 }
 
+function setupRewardUI() {
+  if ($('#rewardBar')) return;
+  const announcement = $('.dorhami-announcement');
+  if (!announcement || !chatView) return;
+  const bar = document.createElement('div');
+  bar.id = 'rewardBar';
+  bar.innerHTML = '<div class="reward-balance"><span>🌹</span><b>گل‌های من</b><strong id="flowerBalance">0</strong></div><button id="claimRewardBtn" type="button">🎁 پاداش فعالیت</button>';
+  bar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 10px;padding:9px 11px;border:1px solid rgba(244,114,182,.25);border-radius:14px;background:linear-gradient(90deg,rgba(244,114,182,.09),rgba(124,58,237,.06));box-shadow:0 0 18px rgba(244,114,182,.06);';
+  bar.querySelector('.reward-balance').style.cssText = 'display:flex;align-items:center;gap:6px;min-width:0;color:#f8fafc;font-size:10px;';
+  bar.querySelector('.reward-balance span').style.fontSize = '17px';
+  bar.querySelector('.reward-balance b').style.fontWeight = '800';
+  bar.querySelector('.reward-balance strong').style.cssText = 'min-width:28px;text-align:center;color:#f9a8d4;font-size:12px;';
+  const button = bar.querySelector('#claimRewardBtn');
+  button.style.cssText = 'border:1px solid rgba(244,114,182,.3);border-radius:10px;padding:7px 10px;background:rgba(244,114,182,.12);color:#fff;font-size:9px;font-weight:800;cursor:pointer;';
+  announcement.parentNode.insertBefore(bar, announcement);
+  button.addEventListener('click', claimActivityReward);
+}
+
+function updateRewardBalance(flowers) {
+  const balance = $('#flowerBalance');
+  if (balance) balance.textContent = String(Number(flowers || 0));
+}
+
+async function claimActivityReward() {
+  const button = $('#claimRewardBtn');
+  if (button) button.disabled = true;
+  try {
+    const reward = await api('/rewards/claim', { method: 'POST', body: JSON.stringify({}) });
+    updateRewardBalance(reward.flowers);
+    if (reward.rewarded) {
+      showActivityRewardToast('🎁 پاداش فعالیت: ۱۰ 🌹 گل به حسابت اضافه شد!');
+      if (button) button.textContent = '✅ دریافت شد';
+    } else if (button) {
+      button.textContent = '⏳ پاداش امروز دریافت شده';
+    }
+  } catch (error) {
+    if (button) button.textContent = '❌ خطا؛ دوباره تلاش کن';
+  } finally {
+    if (button) {
+      setTimeout(() => {
+        button.disabled = false;
+        button.textContent = '🎁 پاداش فعالیت';
+      }, 2200);
+    }
+  }
+}
+
 async function updatePresence() {
   if (!username) return;
   try {
     await api('/presence', { method: 'POST', body: JSON.stringify({ username }) });
     const reward = await api('/rewards/claim', { method: 'POST', body: JSON.stringify({}) });
+    updateRewardBalance(reward.flowers);
     if (reward.rewarded) showActivityRewardToast('🎁 پاداش فعالیت: ۱۰ 🌹 گل به حسابت اضافه شد!');
     const data = await api('/presence', { method: 'GET', headers: {} });
     const names = (data.users || []).map(u => u.username);
@@ -230,6 +278,7 @@ function stopUnreadPolling() {
 async function showChat() {
   authView.classList.add('hidden');
   chatView.classList.remove('hidden');
+  setupRewardUI();
   $('#onlineText').textContent = `در حال اتصال · ${username}`;
   $('#myAvatar').textContent = '👤';
   $('#myProfileName').textContent = username;
