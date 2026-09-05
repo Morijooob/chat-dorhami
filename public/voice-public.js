@@ -2,6 +2,7 @@
   const form = document.getElementById('messageForm');
   const originalButton = document.getElementById('voiceRecordButton');
   const status = document.getElementById('voiceStatus');
+  const messages = document.getElementById('messages');
   if (!form || !originalButton || originalButton.dataset.voicePublicInstalled === '1') return;
 
   const button = originalButton.cloneNode(false);
@@ -84,21 +85,13 @@
     try {
       setStatus('⏳ در حال ارسال ویس…', true);
       const mime = String(pendingVoiceBlob.type || 'audio/webm').split(';')[0].trim().toLowerCase();
-      const response = await fetch('/voice/upload', {
-        method: 'POST',
-        headers: { 'content-type': mime },
-        body: pendingVoiceBlob
-      });
+      const response = await fetch('/voice/upload', { method: 'POST', headers: { 'content-type': mime }, body: pendingVoiceBlob });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'آپلود ویس انجام نشد.');
       const voiceId = data.voice_id || data.id;
       if (!voiceId) throw new Error('شناسه ویس از سرور دریافت نشد.');
       const me = localStorage.getItem('dorhami_user') || '';
-      const send = await fetch('/messages', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ username: me, text: `[voice:${voiceId}:${mime}]` })
-      });
+      const send = await fetch('/messages', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: me, text: `[voice:${voiceId}:${mime}]` }) });
       const sendData = await send.json().catch(() => ({}));
       if (!send.ok) throw new Error(sendData.error || 'ارسال ویس انجام نشد.');
       pendingVoiceBlob = null;
@@ -111,6 +104,25 @@
     } finally { busy = false; }
   }, true);
 
+  // app.js rebuilds the message list every 2.5s. Ignore identical HTML so the
+  // chat does not jump and an audio element is not destroyed while playing.
+  if (messages) {
+    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+    if (descriptor?.get && descriptor?.set) {
+      let lastHTML = descriptor.get.call(messages);
+      Object.defineProperty(messages, 'innerHTML', {
+        configurable: true,
+        get() { return descriptor.get.call(this); },
+        set(value) {
+          const next = String(value);
+          if (next === lastHTML) return;
+          lastHTML = next;
+          descriptor.set.call(this, next);
+        }
+      });
+    }
+  }
+
   function renderPlayers() {
     document.querySelectorAll('#messages .message .body').forEach(body => {
       if (body.querySelector('audio')) return;
@@ -122,12 +134,12 @@
       const audio = document.createElement('audio');
       audio.controls = true;
       audio.preload = 'metadata';
+      audio.playsInline = true;
       audio.src = '/voice?id=' + encodeURIComponent(match[1]);
       body.appendChild(audio);
     });
   }
 
   renderPlayers();
-  const messages = document.getElementById('messages');
   if (messages) new MutationObserver(renderPlayers).observe(messages, { subtree: true, childList: true });
 })();
