@@ -19,10 +19,6 @@
     document.head.appendChild(style);
   }
 
-  function isManager(name) {
-    return String(name || '').trim() === MANAGER;
-  }
-
   function badge() {
     const el = document.createElement('span');
     el.className = 'manager-badge';
@@ -30,54 +26,64 @@
     return el;
   }
 
-  function decorate() {
+  let verifiedManager = false;
+
+  async function verifyManager() {
+    try {
+      const response = await fetch('/profile/me', { cache: 'no-store' });
+      const data = await response.json().catch(() => ({}));
+      verifiedManager = response.ok && String(data.username || '').trim() === MANAGER;
+      return verifiedManager;
+    } catch (_) {
+      verifiedManager = false;
+      return false;
+    }
+  }
+
+  function decorateOwnProfile() {
+    if (!verifiedManager) return;
+
     const mine = document.getElementById('myProfile');
     const mineName = document.getElementById('myProfileName');
-    if (mine && mineName && isManager(mineName.textContent)) {
+    if (mine && mineName) {
       mine.querySelector('.avatar')?.classList.add('manager-avatar');
       if (!mine.querySelector('.manager-badge')) mine.appendChild(badge());
     }
 
-    document.querySelectorAll('.message').forEach(message => {
-      const name = message.dataset.username || message.querySelector('.meta')?.textContent?.split('·')[0]?.trim();
-      if (!isManager(name)) return;
-      message.querySelector('.message-avatar')?.classList.add('manager-avatar');
-      const meta = message.querySelector('.meta');
-      if (meta && !meta.querySelector('.manager-badge')) meta.appendChild(badge());
-    });
-
     const profileName = document.getElementById('profileUsername');
     const profileAvatar = document.getElementById('profileAvatar');
-    if (profileName && isManager(profileName.textContent)) {
+    const status = document.getElementById('profileStatus');
+    const kicker = document.getElementById('profileKickerText');
+    if (profileName && profileName.textContent.trim() === MANAGER) {
       profileAvatar?.classList.add('manager-avatar');
       profileName.classList.add('manager-profile-title');
       if (!profileName.querySelector('.manager-badge')) profileName.appendChild(badge());
-      const status = document.getElementById('profileStatus');
-      if (status && status.textContent !== 'مدیرکل دورهمی') status.textContent = 'مدیرکل دورهمی';
-      const kicker = document.getElementById('profileKickerText');
-      if (kicker && kicker.textContent !== 'مدیرکل دورهمی') kicker.textContent = 'مدیرکل دورهمی';
+      if (status) status.textContent = 'مدیرکل دورهمی';
+      if (kicker) kicker.textContent = 'مدیرکل دورهمی';
     }
   }
 
   async function makeManagerVip() {
+    if (!verifiedManager) return;
     try {
-      const current = localStorage.getItem('dorhami_user') || '';
-      if (!isManager(current)) return;
-      const response = await fetch('/admin/user-vip', {
+      await fetch('/admin/user-vip', {
         method: 'POST',
         headers: {'content-type':'application/json'},
         body: JSON.stringify({username: MANAGER, is_vip: 1})
       });
-      if (!response.ok) return;
     } catch (_) {}
   }
 
-  function start() {
+  async function start() {
     installStyle();
-    decorate();
-    const observer = new MutationObserver(decorate);
+    await verifyManager();
+    decorateOwnProfile();
+    if (verifiedManager) makeManagerVip();
+
+    const observer = new MutationObserver(() => {
+      if (verifiedManager) decorateOwnProfile();
+    });
     observer.observe(document.body, {subtree:true, childList:true});
-    makeManagerVip();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, {once:true});
