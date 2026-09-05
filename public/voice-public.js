@@ -75,11 +75,6 @@
     if (!pendingVoiceBlob) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    const privateWith = String(document.getElementById('privateWith')?.textContent || '').trim();
-    if (privateWith) {
-      setStatus('🎙️ فعلاً ارسال ویس فقط در اتاق عمومی فعال است.', true);
-      return;
-    }
     if (busy) return;
     busy = true;
     try {
@@ -90,12 +85,28 @@
       if (!response.ok) throw new Error(data.error || 'آپلود ویس انجام نشد.');
       const voiceId = data.voice_id || data.id;
       if (!voiceId) throw new Error('شناسه ویس از سرور دریافت نشد.');
+
       const me = localStorage.getItem('dorhami_user') || '';
-      const send = await fetch('/messages', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: me, text: `[voice:${voiceId}:${mime}]` }) });
+      const privateWith = String(document.getElementById('privateWith')?.textContent || '').trim();
+      const voiceText = `[voice:${voiceId}:${mime}]`;
+      let send;
+      if (privateWith) {
+        send = await fetch('/private-messages', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sender: me, recipient: privateWith, text: voiceText })
+        });
+      } else {
+        send = await fetch('/messages', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ username: me, text: voiceText })
+        });
+      }
       const sendData = await send.json().catch(() => ({}));
       if (!send.ok) throw new Error(sendData.error || 'ارسال ویس انجام نشد.');
       pendingVoiceBlob = null;
-      setStatus('✅ ویس ارسال شد.', true);
+      setStatus(privateWith ? '✅ ویس خصوصی ارسال شد.' : '✅ ویس ارسال شد.', true);
       setTimeout(() => setStatus('', false), 1200);
       document.getElementById('messageInput')?.focus();
       window.dispatchEvent(new CustomEvent('dorhami:voice-sent'));
