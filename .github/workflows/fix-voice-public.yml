@@ -1,0 +1,98 @@
+name: Apply public voice message patch
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-voice-public.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch voice integration
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('public/typing.js')
+          s = p.read_text()
+          old = "setVoiceStatus(`🎙️ ویس ضبط شد (${sizeKb} KB) — مرحله ارسال در قدم بعدی اضافه می‌شود.`, true);"
+          new = "if (recordedVoiceBlob.size > 2 * 1024 * 1024) { setVoiceStatus('❌ حجم ویس بیشتر از ۲ مگابایت است.', true); recordedVoiceBlob = null; } else { setVoiceStatus(`🎙️ ویس آماده ارسال (${sizeKb} KB) — برای ارسال روی دکمه ارسال بزن.`, true); window.dispatchEvent(new CustomEvent('dorhami:voice-recorded', { detail: { blob: recordedVoiceBlob } })); }"
+          if old not in s:
+              raise SystemExit('typing.js target missing')
+          p.write_text(s.replace(old, new, 1))
+
+          p = Path('public/app.js')
+          s = p.read_text()
+          marker = "let myAvatar = '👤';"
+          insert = """let myAvatar = '👤';
+let pendingVoiceBlob = null;
+async function uploadVoiceBlob(blob) {
+  const form = new FormData();
+  const ext = blob.type.includes('ogg') ? 'ogg' : blob.type.includes('mp4') ? 'mp4' : 'webm';
+  form.append('file', blob, `voice.${ext}`);
+  const response = await fetch('/voice/upload', { method: 'POST', body: form });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'آپلود ویس انجام نشد.');
+  return data;
+}
+window.addEventListener('dorhami:voice-recorded', event => { pendingVoiceBlob = event.detail?.blob || null; });"""
+          if marker not in s:
+              raise SystemExit('app.js avatar marker missing')
+          s = s.replace(marker, insert, 1)
+
+          old_render = """const mine = m.username === username ? ' mine' : '';
+    const time = new Date(m.created_at).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+    return `<article class=\"message${mine}\" data-username=\"${escapeHtml(m.username)}\"><button class=\"message-user\" type=\"button\"><span class=\"message-avatar avatar\">${escapeHtml(avatarFor(m.username))}</span><span class=\"meta\">${escapeHtml(m.username)} · ${time}</span></button><div class=\"body\">${escapeHtml(m.text)}</div></article>`;"""
+          new_render = """const mine = m.username === username ? ' mine' : '';
+    const time = new Date(m.created_at).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+    const voiceMatch = String(m.text || '').match(/^\\[voice:([^:]+):([^\\]]+)\\]$/);
+    const body = voiceMatch ? `<div class=\"body voice-message\"><audio controls preload=\"metadata\" src=\"/voice?id=${encodeURIComponent(voiceMatch[1])}\"></audio></div>` : `<div class=\"body\">${escapeHtml(m.text)}</div>`;
+    return `<article class=\"message${mine}\" data-username=\"${escapeHtml(m.username)}\"><button class=\"message-user\" type=\"button\"><span class=\"message-avatar avatar\">${escapeHtml(avatarFor(m.username))}</span><span class=\"meta\">${escapeHtml(m.username)} · ${time}</span></button>${body}</article>`;"""
+          if old_render not in s:
+              raise SystemExit('app.js render target missing')
+          s = s.replace(old_render, new_render, 1)
+
+          old_submit = """const text = messageInput.value.trim();
+  if (!text) return;"""
+          new_submit = """const text = messageInput.value.trim();
+  if (!text && !pendingVoiceBlob) return;"""
+          if old_submit not in s:
+              raise SystemExit('app.js submit guard missing')
+          s = s.replace(old_submit, new_submit, 1)
+
+          old_branch = """messageInput.disabled = true;
+  try {
+    if (currentPrivateUser) {"""
+          new_branch = """messageInput.disabled = true;
+  try {
+    if (pendingVoiceBlob && !currentPrivateUser) {
+      const uploaded = await uploadVoiceBlob(pendingVoiceBlob);
+      const voiceId = uploaded.id || uploaded.voice?.id || uploaded.file?.id;
+      if (!voiceId) throw new Error('شناسه ویس از سرور دریافت نشد.');
+      await api('/messages', { method: 'POST', body: JSON.stringify({ username, text: `[voice:${voiceId}:${pendingVoiceBlob.type || 'audio/webm'}]` }) });
+      pendingVoiceBlob = null;
+      messageInput.value = '';
+      await loadMessages();
+    } else if (currentPrivateUser) {"""
+          if old_branch not in s:
+              raise SystemExit('app.js submit branch missing')
+          p.write_text(s.replace(old_branch, new_branch, 1))
+
+          p = Path('public/style.css')
+          s = p.read_text()
+          if '.voice-message audio' not in s:
+              s += "\n.voice-message{display:flex;align-items:center;min-width:220px;max-width:100%}.voice-message audio{width:min(320px,100%);height:40px}\n"
+              p.write_text(s)
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/app.js public/typing.js public/style.css
+          git diff --cached --quiet && { echo 'NO_CHANGES'; exit 1; }
+          git commit -m 'Complete VIP voice messages in public chat'
+          git push
+          git rm .github/workflows/fix-voice-public.yml
+          git commit -m 'Remove temporary voice patch workflow'
+          git push
