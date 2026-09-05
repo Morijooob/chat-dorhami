@@ -9,6 +9,25 @@ function getCookie(request, name) { const header = request.headers.get("cookie")
 export class ChatRoom extends DurableObject {
   constructor(ctx, env) { super(ctx, env); this.ready = this.initialize(); this.typing = new Map(); }
 
+  static PUBLIC_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+  async ensurePublicCleanupAlarm() {
+    try {
+      const currentAlarm = await this.ctx.storage.getAlarm();
+      if (currentAlarm == null) await this.ctx.storage.setAlarm(Date.now() + ChatRoom.PUBLIC_CLEANUP_INTERVAL_MS);
+    } catch (error) {
+      console.error('Public cleanup alarm setup failed:', error);
+    }
+  }
+
+  async alarm() {
+    try {
+      this.ctx.storage.sql.exec('DELETE FROM messages');
+    } finally {
+      await this.ctx.storage.setAlarm(Date.now() + ChatRoom.PUBLIC_CLEANUP_INTERVAL_MS);
+    }
+  }
+
   async initialize() {
     this.ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, created_at INTEGER NOT NULL, avatar TEXT NOT NULL DEFAULT '👤', role TEXT NOT NULL DEFAULT 'user', is_starred INTEGER NOT NULL DEFAULT 0, is_blocked INTEGER NOT NULL DEFAULT 0, is_crowned INTEGER NOT NULL DEFAULT 0, is_diamond INTEGER NOT NULL DEFAULT 0, is_vip INTEGER NOT NULL DEFAULT 0);
