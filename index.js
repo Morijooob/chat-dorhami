@@ -104,6 +104,25 @@ export class ChatRoom extends DurableObject {
     return rows.length ? String(rows[0].username || "").trim() : "";
   }
 
+  getSessionUser(request) {
+    const token = getCookie(request, "dorhami_session");
+    if (!token) return null;
+    const rows = this.ctx.storage.sql.exec(
+      "SELECT u.username, u.role FROM sessions s JOIN users u ON u.username = s.username WHERE s.token = ? LIMIT 1",
+      token
+    ).toArray();
+    if (!rows.length) return null;
+    return {
+      username: String(rows[0].username || "").trim(),
+      role: String(rows[0].role || "user").trim()
+    };
+  }
+
+  getAdminUser(request) {
+    const user = this.getSessionUser(request);
+    return user && user.role === "admin" ? user : null;
+  }
+
   async fetch(request) {
     try {
       await this.ready;
@@ -112,6 +131,13 @@ export class ChatRoom extends DurableObject {
       if (request.method === "GET" && url.pathname === "/health") {
         this.ctx.storage.sql.exec("SELECT 1").toArray();
         return json({ ok: true, server: true, database: true });
+      }
+
+      if (request.method === "GET" && url.pathname === "/admin") {
+        const user = this.getSessionUser(request);
+        if (!user) return json({ error: "برای ورود به پنل مدیریت ابتدا وارد حساب شو." }, 401);
+        if (user.role !== "admin") return json({ error: "دسترسی غیرمجاز." }, 403);
+        return json({ ok: true, admin: user.username });
       }
 
       if (request.method === "POST" && url.pathname === "/register") {
@@ -314,7 +340,7 @@ export class ChatRoom extends DurableObject {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const apiPaths = new Set(["/health", "/register", "/login", "/profile", "/users", "/presence", "/typing", "/messages", "/reactions", "/private-messages", "/private-unread", "/private-read"]);
+    const apiPaths = new Set(["/health", "/register", "/login", "/profile", "/users", "/presence", "/typing", "/messages", "/reactions", "/private-messages", "/private-unread", "/private-read", "/admin"]);
     if (apiPaths.has(url.pathname)) {
       try {
         const id = env.CHAT_ROOM.idFromName("public-room");
