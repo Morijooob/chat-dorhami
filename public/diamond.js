@@ -60,12 +60,14 @@
       if (!target) throw new Error('کاربر مدیریت پیدا نشد.');
       target.click();
       await new Promise(resolve => setTimeout(resolve, 180));
+      const storeModal = document.getElementById('dorhamiStoreModal');
+      if (storeModal) storeModal.remove();
       const messageInput = document.getElementById('messageInput');
       if (messageInput) {
         messageInput.value = `سلام مدیریت، درخواست خرید ${packageText} را دارم. لطفاً راهنمایی پرداخت را اعلام کنید.`;
         messageInput.focus();
       }
-      if (status) status.textContent = '✅ گفتگوی خصوصی با مدیریت باز شد؛ پیام آماده ارسال است.';
+      if (status) status.textContent = '✅ وارد گفتگوی خصوصی با مدیریت شدی؛ پیام آماده ارسال است.';
     } catch (error) {
       if (status) status.textContent = `❌ ${error.message}`;
     }
