@@ -83,11 +83,12 @@
     busy = true;
     try {
       setStatus('⏳ در حال ارسال ویس…', true);
-      const upload = new FormData();
       const mime = String(pendingVoiceBlob.type || 'audio/webm').split(';')[0].trim().toLowerCase();
-      const ext = mime.includes('ogg') ? 'ogg' : mime.includes('mp4') ? 'mp4' : mime.includes('mpeg') ? 'mp3' : mime.includes('wav') ? 'wav' : 'webm';
-      upload.append('file', new File([pendingVoiceBlob], `voice.${ext}`, { type: mime }));
-      const response = await fetch('/voice/upload', { method: 'POST', body: upload });
+      const response = await fetch('/voice/upload', {
+        method: 'POST',
+        headers: { 'content-type': mime },
+        body: pendingVoiceBlob
+      });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'آپلود ویس انجام نشد.');
       const voiceId = data.voice_id || data.id;
@@ -130,4 +131,3 @@
   const messages = document.getElementById('messages');
   if (messages) new MutationObserver(renderPlayers).observe(messages, { subtree: true, childList: true });
 })();
-// cache bump to trigger the one-time backend patch workflow
