@@ -44,7 +44,8 @@ export class ChatRoom extends DurableObject {
         avatar TEXT NOT NULL DEFAULT '👤',
         role TEXT NOT NULL DEFAULT 'user',
         is_starred INTEGER NOT NULL DEFAULT 0,
-        is_blocked INTEGER NOT NULL DEFAULT 0
+        is_blocked INTEGER NOT NULL DEFAULT 0,
+        is_crowned INTEGER NOT NULL DEFAULT 0
       );
       CREATE TABLE IF NOT EXISTS sessions (
         token TEXT PRIMARY KEY,
@@ -93,6 +94,7 @@ export class ChatRoom extends DurableObject {
     try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"); } catch (error) {}
     try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN is_starred INTEGER NOT NULL DEFAULT 0"); } catch (error) {}
     try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0"); } catch (error) {}
+    try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN is_crowned INTEGER NOT NULL DEFAULT 0"); } catch (error) {}
   }
 
   createSession(username) {
@@ -205,7 +207,7 @@ export class ChatRoom extends DurableObject {
       }
 
       if (request.method === "GET" && url.pathname === "/users") {
-        const rows = this.ctx.storage.sql.exec("SELECT username, avatar, is_starred, is_blocked FROM users ORDER BY username COLLATE NOCASE").toArray();
+        const rows = this.ctx.storage.sql.exec("SELECT username, avatar, is_starred, is_blocked, is_crowned FROM users ORDER BY username COLLATE NOCASE").toArray();
         return json({ ok: true, users: rows });
       }
 
@@ -220,6 +222,20 @@ export class ChatRoom extends DurableObject {
         if (!exists.length) return json({ error: "کاربر پیدا نشد." }, 404);
         this.ctx.storage.sql.exec("UPDATE users SET is_starred = ? WHERE username = ?", starred ? 1 : 0, username);
         return json({ ok: true, username, is_starred: starred ? 1 : 0 });
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/user-crown") {
+        const admin = this.getAdminUser(request);
+        if (!admin) return json({ error: "دسترسی غیرمجاز." }, 403);
+        const body = await request.json().catch(() => ({}));
+        const username = String(body.username || "").trim();
+        const crowned = Boolean(body.crowned);
+        if (!username || username.length > 24) return json({ error: "کاربر نامعتبر است." }, 400);
+        if (username === "Morteza2026") return json({ error: "حساب مدیر نیازی به تاج ندارد." }, 400);
+        const exists = this.ctx.storage.sql.exec("SELECT username FROM users WHERE username = ? LIMIT 1", username).toArray();
+        if (!exists.length) return json({ error: "کاربر پیدا نشد." }, 404);
+        this.ctx.storage.sql.exec("UPDATE users SET is_crowned = ? WHERE username = ?", crowned ? 1 : 0, username);
+        return json({ ok: true, username, is_crowned: crowned ? 1 : 0 });
       }
 
       if (request.method === "POST" && url.pathname === "/admin/user-block") {
@@ -400,7 +416,7 @@ export class ChatRoom extends DurableObject {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const apiPaths = new Set(["/health", "/register", "/login", "/profile", "/profile/me", "/users", "/presence", "/typing", "/messages", "/reactions", "/private-messages", "/private-unread", "/private-read", "/admin", "/admin/user-star", "/admin/user-block"]);
+    const apiPaths = new Set(["/health", "/register", "/login", "/profile", "/profile/me", "/users", "/presence", "/typing", "/messages", "/reactions", "/private-messages", "/private-unread", "/private-read", "/admin", "/admin/user-star", "/admin/user-crown", "/admin/user-block"]);
     if (apiPaths.has(url.pathname)) {
       try {
         const id = env.CHAT_ROOM.idFromName("public-room");
