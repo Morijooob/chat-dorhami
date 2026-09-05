@@ -15,7 +15,8 @@
     .panel{padding:24px;border:1px solid rgba(255,255,255,.1);border-radius:24px;background:rgba(13,18,38,.82);box-shadow:0 24px 70px rgba(0,0,0,.35);backdrop-filter:blur(14px)}
     .status{display:flex;align-items:center;gap:9px;margin-bottom:22px;color:#a7f3d0;font-size:11px}.dot{width:8px;height:8px;border-radius:50%;background:#34d399;box-shadow:0 0 12px #34d399}
     .cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-    .card{padding:18px;border:1px solid rgba(255,255,255,.08);border-radius:17px;background:rgba(255,255,255,.035)}
+    .card{display:block;padding:18px;border:1px solid rgba(255,255,255,.08);border-radius:17px;background:rgba(255,255,255,.035);color:#fff;text-decoration:none;transition:.18s ease}
+    .card:hover{transform:translateY(-2px);border-color:rgba(255,255,255,.18);background:rgba(255,255,255,.06)}
     .card b{display:block;font-size:13px;margin-bottom:7px}.card span{color:#64748b;font-size:10px}
     .loading{text-align:center;color:#94a3b8;font-size:11px;padding:20px}
     .error{display:none;padding:16px;border-radius:14px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);color:#fecaca;font-size:11px;line-height:1.9}
@@ -33,7 +34,7 @@
       <div id="error" class="error"></div>
       <div id="content" hidden>
         <div class="cards">
-          <div class="card"><b>👥 کاربران</b><span>بخش مدیریت کاربران در مرحله بعد فعال می‌شود.</span></div>
+          <a class="card" href="/admin-users.html"><b>👥 کاربران</b><span>مشاهده و جستجوی کاربران ثبت‌نام‌شده.</span></a>
           <div class="card"><b>🟢 وضعیت آنلاین</b><span>آمار آنلاین‌ها در مرحله بعد اضافه می‌شود.</span></div>
           <div class="card"><b>🚫 مسدودسازی</b><span>فعلاً غیرفعال — هیچ عملیات حساسی فعال نیست.</span></div>
           <div class="card"><b>📊 آمار کلی</b><span>داشبورد آماری در مرحله بعد ساخته می‌شود.</span></div>
