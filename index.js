@@ -1,12 +1,13 @@
 import { DurableObject } from "cloudflare:workers";
 
-const json = (data, status = 200) =>
+const json = (data, status = 200, extraHeaders = {}) =>
   new Response(JSON.stringify(data), {
     status,
     headers: {
       "content-type": "application/json; charset=UTF-8",
       "cache-control": "no-store",
-      "access-control-allow-origin": "*"
+      "access-control-allow-origin": "*",
+      ...extraHeaders
     }
   });
 
@@ -14,6 +15,16 @@ async function hashPassword(password) {
   const bytes = new TextEncoder().encode(password);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function sessionCookie(token) {
+  return `dorhami_session=${token}; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=2592000`;
+}
+
+function getCookie(request, name) {
+  const header = request.headers.get("cookie") || "";
+  const item = header.split(";").map(part => part.trim()).find(part => part.startsWith(`${name}=`));
+  return item ? decodeURIComponent(item.slice(name.length + 1)) : "";
 }
 
 export class ChatRoom extends DurableObject {
@@ -32,6 +43,11 @@ export class ChatRoom extends DurableObject {
         created_at INTEGER NOT NULL,
         avatar TEXT NOT NULL DEFAULT '👤',
         role TEXT NOT NULL DEFAULT 'user'
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        username TEXT NOT NULL,
+        created_at INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,6 +79,7 @@ export class ChatRoom extends DurableObject {
         created_at INTEGER NOT NULL,
         PRIMARY KEY (message_key, username, emoji)
       );
+      CREATE INDEX IF NOT EXISTS sessions_username ON sessions(username);
       CREATE INDEX IF NOT EXISTS messages_created_at ON messages(created_at);
       CREATE INDEX IF NOT EXISTS private_messages_pair ON private_messages(sender, recipient, id);
       CREATE INDEX IF NOT EXISTS private_messages_created_at ON private_messages(created_at);
@@ -72,6 +89,19 @@ export class ChatRoom extends DurableObject {
     `);
     try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN avatar TEXT NOT NULL DEFAULT '👤'"); } catch (error) {}
     try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"); } catch (error) {}
+  }
+
+  createSession(username) {
+    const token = crypto.randomUUID();
+    this.ctx.storage.sql.exec("INSERT INTO sessions (token, username, created_at) VALUES (?, ?, ?)", token, username, Date.now());
+    return token;
+  }
+
+  getSessionUsername(request) {
+    const token = getCookie(request, "dorhami_session");
+    if (!token) return "";
+    const rows = this.ctx.storage.sql.exec("SELECT username FROM sessions WHERE token = ? LIMIT 1", token).toArray();
+    return rows.length ? String(rows[0].username || "").trim() : "";
   }
 
   async fetch(request) {
@@ -93,7 +123,8 @@ export class ChatRoom extends DurableObject {
         const exists = this.ctx.storage.sql.exec("SELECT id FROM users WHERE username = ? LIMIT 1", username).toArray();
         if (exists.length) return json({ error: "این نام کاربری قبلاً ثبت شده است." }, 409);
         this.ctx.storage.sql.exec("INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)", username, await hashPassword(password), Date.now());
-        return json({ ok: true, username, avatar: "👤" });
+        const token = this.createSession(username);
+        return json({ ok: true, username, avatar: "👤" }, 200, { "set-cookie": sessionCookie(token) });
       }
 
       if (request.method === "POST" && url.pathname === "/login") {
@@ -102,7 +133,8 @@ export class ChatRoom extends DurableObject {
         const password = String(body.password || "");
         const rows = this.ctx.storage.sql.exec("SELECT username, password_hash, avatar FROM users WHERE username = ? LIMIT 1", username).toArray();
         if (!rows.length || rows[0].password_hash !== await hashPassword(password)) return json({ error: "نام کاربری یا رمز عبور اشتباه است." }, 401);
-        return json({ ok: true, username: rows[0].username, avatar: rows[0].avatar || "👤" });
+        const token = this.createSession(rows[0].username);
+        return json({ ok: true, username: rows[0].username, avatar: rows[0].avatar || "👤" }, 200, { "set-cookie": sessionCookie(token) });
       }
 
       if (request.method === "GET" && url.pathname === "/profile") {
@@ -115,13 +147,14 @@ export class ChatRoom extends DurableObject {
 
       if (request.method === "POST" && url.pathname === "/profile") {
         const body = await request.json();
-        const username = String(body.username || "").trim();
         const avatar = String(body.avatar || "").trim();
+        const sessionUsername = this.getSessionUsername(request);
         const allowed = new Set(["😀","😎","🥰","🤩","😇","🥳","🤓","😈","👻","🤖","🐱","🐼","🦊","🐸","🐯","🦁","🐵","🐨","🐰","🐙","🦄","🐲","🌙","⭐","🔥"]);
-        if (!username || !allowed.has(avatar)) return json({ error: "آواتار انتخاب‌شده معتبر نیست." }, 400);
-        const result = this.ctx.storage.sql.exec("UPDATE users SET avatar = ? WHERE username = ?", avatar, username);
+        if (!sessionUsername) return json({ error: "برای ویرایش پروفایل باید وارد حساب خودت باشی." }, 401);
+        if (!allowed.has(avatar)) return json({ error: "آواتار انتخاب‌شده معتبر نیست." }, 400);
+        const result = this.ctx.storage.sql.exec("UPDATE users SET avatar = ? WHERE username = ?", avatar, sessionUsername);
         if (!result) return json({ error: "ذخیره آواتار انجام نشد." }, 500);
-        const rows = this.ctx.storage.sql.exec("SELECT username, avatar FROM users WHERE username = ? LIMIT 1", username).toArray();
+        const rows = this.ctx.storage.sql.exec("SELECT username, avatar FROM users WHERE username = ? LIMIT 1", sessionUsername).toArray();
         if (!rows.length) return json({ error: "کاربر پیدا نشد." }, 404);
         return json({ ok: true, profile: { username: rows[0].username, avatar: rows[0].avatar } });
       }
