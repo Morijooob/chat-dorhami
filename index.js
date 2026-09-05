@@ -23,6 +23,7 @@ export class ChatRoom extends DurableObject {
       CREATE TABLE IF NOT EXISTS room_members (room_id TEXT NOT NULL, username TEXT NOT NULL, joined_at INTEGER NOT NULL, is_owner INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (room_id, username));
       CREATE TABLE IF NOT EXISTS room_bans (room_id TEXT NOT NULL, username TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (room_id, username));
       CREATE TABLE IF NOT EXISTS room_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT NOT NULL, sender TEXT NOT NULL, text TEXT NOT NULL, created_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS voice_files (id TEXT PRIMARY KEY, username TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, created_at INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS sessions_username ON sessions(username);
       CREATE INDEX IF NOT EXISTS messages_created_at ON messages(created_at);
       CREATE INDEX IF NOT EXISTS private_messages_pair ON private_messages(sender, recipient, id);
@@ -32,6 +33,7 @@ export class ChatRoom extends DurableObject {
       CREATE INDEX IF NOT EXISTS message_reactions_key ON message_reactions(message_key);
       CREATE INDEX IF NOT EXISTS room_messages_room_id ON room_messages(room_id, id);
       CREATE INDEX IF NOT EXISTS room_members_user ON room_members(username, room_id);
+      CREATE INDEX IF NOT EXISTS voice_files_user ON voice_files(username, created_at);
     `);
     try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN avatar TEXT NOT NULL DEFAULT '👤'"); } catch (error) {}
     try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"); } catch (error) {}
@@ -92,6 +94,37 @@ export class ChatRoom extends DurableObject {
       if (url.pathname === "/private-unread" && request.method === "GET") { const me = String(url.searchParams.get("me") || "").trim(); if (!me) return json({ error: "کاربر نامعتبر است." }, 400); if (this.isUserBlocked(me)) return json({ error: "این حساب توسط مدیریت مسدود شده است." }, 403); const rows = this.ctx.storage.sql.exec(`SELECT pm.sender, COUNT(*) AS count, MAX(pm.id) AS latest_id FROM private_messages pm LEFT JOIN private_reads pr ON pr.username = ? AND pr.other_user = pm.sender WHERE pm.recipient = ? AND pm.id > COALESCE(pr.last_read_id, 0) GROUP BY pm.sender ORDER BY latest_id DESC`, me, me).toArray(); const total = rows.reduce((sum, row) => sum + Number(row.count || 0), 0); return json({ ok: true, total, users: rows }); }
       if (url.pathname === "/private-read" && request.method === "POST") { const body = await request.json(); const username = String(body.username || "").trim(); const otherUser = String(body.otherUser || "").trim(); const lastReadId = Number(body.lastReadId || 0); if (!username || !otherUser || username === otherUser || !Number.isFinite(lastReadId) || lastReadId < 0) return json({ error: "اطلاعات خواندن نامعتبر است." }, 400); if (this.isUserBlocked(username)) return json({ error: "این حساب توسط مدیریت مسدود شده است." }, 403); this.ctx.storage.sql.exec(`INSERT INTO private_reads (username, other_user, last_read_id) VALUES (?, ?, ?) ON CONFLICT(username, other_user) DO UPDATE SET last_read_id = MAX(last_read_id, excluded.last_read_id)`, username, otherUser, Math.floor(lastReadId)); return json({ ok: true }); }
 
+      if (request.method === "POST" && url.pathname === "/voice/upload") {
+        const username = this.getSessionUsername(request);
+        if (!username) return json({ error: "برای ارسال ویس باید وارد حساب خودت باشی." }, 401);
+        if (this.isUserBlocked(username)) return json({ error: "این حساب توسط مدیریت مسدود شده است." }, 403);
+        const vip = this.ctx.storage.sql.exec("SELECT is_vip FROM users WHERE username = ? LIMIT 1", username).toArray();
+        if (!vip.length || Number(vip[0].is_vip) !== 1) return json({ error: "ارسال ویس فقط برای کاربران VIP فعال است." }, 403);
+        const mime = String(request.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+        const allowed = new Set(["audio/webm","audio/ogg","audio/mp4","audio/mpeg","audio/wav","audio/x-wav"]);
+        if (!allowed.has(mime)) return json({ error: "فرمت صوتی پشتیبانی نمی‌شود." }, 415);
+        const contentLength = Number(request.headers.get("content-length") || 0);
+        if (contentLength > 2 * 1024 * 1024) return json({ error: "حجم ویس حداکثر ۲ مگابایت باشد." }, 413);
+        const data = await request.arrayBuffer();
+        if (!data.byteLength || data.byteLength > 2 * 1024 * 1024) return json({ error: "حجم ویس حداکثر ۲ مگابایت باشد." }, 413);
+        const id = crypto.randomUUID();
+        const key = `voice:${id}`;
+        await this.ctx.storage.put(key, data);
+        this.ctx.storage.sql.exec("INSERT INTO voice_files (id, username, mime_type, size_bytes, created_at) VALUES (?, ?, ?, ?, ?)", id, username, mime, data.byteLength, Date.now());
+        return json({ ok: true, voice_id: id, mime_type: mime, size_bytes: data.byteLength });
+      }
+      if (request.method === "GET" && url.pathname === "/voice") {
+        const username = this.getSessionUsername(request);
+        if (!username) return json({ error: "برای پخش ویس باید وارد حساب خودت باشی." }, 401);
+        const id = String(url.searchParams.get("id") || "").trim();
+        if (!/^[0-9a-f-]{36}$/i.test(id)) return json({ error: "ویس نامعتبر است." }, 400);
+        const rows = this.ctx.storage.sql.exec("SELECT id, mime_type FROM voice_files WHERE id = ? LIMIT 1", id).toArray();
+        if (!rows.length) return json({ error: "ویس پیدا نشد." }, 404);
+        const data = await this.ctx.storage.get(`voice:${id}`, { type: "arrayBuffer" });
+        if (!data) return json({ error: "فایل ویس در دسترس نیست." }, 404);
+        return new Response(data, { status: 200, headers: { "content-type": rows[0].mime_type, "cache-control": "private, max-age=3600", "content-length": String(data.byteLength), "x-content-type-options": "nosniff" } });
+      }
+
       if (request.method === "POST" && url.pathname === "/rooms/create") { const username = this.getSessionUsername(request); if (!username) return json({ error: "برای ساخت اتاق باید وارد حساب خودت باشی." }, 401); const vip = this.ctx.storage.sql.exec("SELECT is_vip FROM users WHERE username = ? LIMIT 1", username).toArray(); if (!vip.length || Number(vip[0].is_vip) !== 1) return json({ error: "ساخت اتاق خصوصی فقط برای کاربران VIP فعال است." }, 403); const body = await request.json().catch(() => ({})); const name = String(body.name || "").trim(); if (name.length < 2 || name.length > 40) return json({ error: "نام اتاق باید بین ۲ تا ۴۰ کاراکتر باشد." }, 400); let id = crypto.randomUUID(); let code = crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase(); while (this.getRoom(id) || this.ctx.storage.sql.exec("SELECT 1 FROM private_rooms WHERE invite_code = ? LIMIT 1", code).toArray().length) { id = crypto.randomUUID(); code = crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase(); } const now = Date.now(); this.ctx.storage.sql.exec("INSERT INTO private_rooms (id, name, owner, invite_code, created_at) VALUES (?, ?, ?, ?, ?)", id, name, username, code, now); this.ctx.storage.sql.exec("INSERT INTO room_members (room_id, username, joined_at, is_owner) VALUES (?, ?, ?, 1)", id, username, now); return json({ ok: true, room: { id, name, owner: username, invite_code: code, created_at: now } }); }
       if (request.method === "GET" && url.pathname === "/rooms/mine") { const username = this.getSessionUsername(request); if (!username) return json({ error: "برای دیدن اتاق‌ها باید وارد حساب خودت باشی." }, 401); const rows = this.ctx.storage.sql.exec("SELECT r.id, r.name, r.owner, r.invite_code, r.created_at, (SELECT COUNT(*) FROM room_members m WHERE m.room_id = r.id) AS member_count FROM private_rooms r JOIN room_members me ON me.room_id = r.id WHERE me.username = ? ORDER BY r.created_at DESC", username).toArray(); return json({ ok: true, rooms: rows }); }
       if (request.method === "POST" && url.pathname === "/rooms/join") { const username = this.getSessionUsername(request); if (!username) return json({ error: "برای ورود به اتاق باید وارد حساب خودت باشی." }, 401); const body = await request.json().catch(() => ({})); const code = String(body.invite_code || "").trim().toUpperCase(); if (!/^[A-Z0-9]{8}$/.test(code)) return json({ error: "کد دعوت نامعتبر است." }, 400); const rooms = this.ctx.storage.sql.exec("SELECT id, name, owner, invite_code, created_at FROM private_rooms WHERE invite_code = ? LIMIT 1", code).toArray(); if (!rooms.length) return json({ error: "اتاقی با این کد پیدا نشد." }, 404); const room = rooms[0]; if (this.isUserBlocked(username)) return json({ error: "این حساب توسط مدیریت مسدود شده است." }, 403); const banned = this.ctx.storage.sql.exec("SELECT 1 FROM room_bans WHERE room_id = ? AND username = ? LIMIT 1", room.id, username).toArray(); if (banned.length) return json({ error: "مدیر این اتاق اجازه ورود دوباره به شما را نداده است." }, 403); this.ctx.storage.sql.exec("INSERT OR IGNORE INTO room_members (room_id, username, joined_at, is_owner) VALUES (?, ?, ?, 0)", room.id, username, Date.now()); return json({ ok: true, room }); }
@@ -107,4 +140,4 @@ export class ChatRoom extends DurableObject {
   }
 }
 
-export default { async fetch(request, env) { const url = new URL(request.url); const apiPaths = new Set(["/health","/announcement","/register","/login","/profile","/profile/me","/vip/status","/users","/presence","/typing","/messages","/reactions","/private-messages","/private-unread","/private-read","/admin","/admin/announcement","/admin/user-vip","/admin/user-star","/admin/user-crown","/admin/user-diamond","/admin/user-block","/rooms/create","/rooms/mine","/rooms/join","/rooms/info","/rooms/messages","/rooms/kick","/rooms/leave","/rooms/delete"]); if (apiPaths.has(url.pathname)) { try { const id = env.CHAT_ROOM.idFromName("public-room"); return await env.CHAT_ROOM.get(id).fetch(request); } catch (error) { return json({ error: "اتصال سرور برقرار نشد.", detail: String(error?.message || error) }, 500); } } return env.ASSETS.fetch(request); } };
+export default { async fetch(request, env) { const url = new URL(request.url); const apiPaths = new Set(["/health","/announcement","/register","/login","/profile","/profile/me","/vip/status","/users","/presence","/typing","/messages","/reactions","/private-messages","/private-unread","/private-read","/voice/upload","/voice","/admin","/admin/announcement","/admin/user-vip","/admin/user-star","/admin/user-crown","/admin/user-diamond","/admin/user-block","/rooms/create","/rooms/mine","/rooms/join","/rooms/info","/rooms/messages","/rooms/kick","/rooms/leave","/rooms/delete"]); if (apiPaths.has(url.pathname)) { try { const id = env.CHAT_ROOM.idFromName("public-room"); return await env.CHAT_ROOM.get(id).fetch(request); } catch (error) { return json({ error: "اتصال سرور برقرار نشد.", detail: String(error?.message || error) }, 500); } } return env.ASSETS.fetch(request); } };
