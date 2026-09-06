@@ -83,6 +83,18 @@ ChatRoom.prototype.fetch = async function(request) {
   return originalChatFetch.call(this, request);
 };
 
+const withAdminDeleteHandler = async (request, response) => {
+  const url = new URL(request.url);
+  if (request.method !== "GET" || !(url.pathname === "/admin-users" || url.pathname === "/admin-users.html")) return response;
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.toLowerCase().includes("text/html")) return response;
+  const html = await response.text();
+  const script = `<script>(function(){document.addEventListener("click",async function(event){const button=event.target.closest("#deleteBtn");if(!button||button.disabled)return;const selected=document.querySelector(".selected");const username=(selected&&selected.textContent||"").trim();if(!username||username==="Morteza2026")return;if(!confirm("⚠️ آیا مطمئنی می‌خواهی کاربر «"+username+"» را حذف کنی؟"))return;if(!confirm("🚨 این کار قابل بازگشت نیست و اطلاعات وابسته این کاربر نیز حذف می‌شود. ادامه می‌دهی؟"))return;button.disabled=true;try{const response=await fetch("/admin/delete-user",{method:"POST",credentials:"same-origin",headers:{"content-type":"application/json"},body:JSON.stringify({username:username})});const data=await response.json().catch(function(){return{};});if(!response.ok||!data.ok)throw new Error(data.error||"حذف کاربر انجام نشد.");alert("✅ "+(data.message||"کاربر با موفقیت حذف شد."));location.reload();}catch(error){button.disabled=false;alert("❌ "+(error&&error.message||"خطا در حذف کاربر."));}});})();</script>`;
+  if (!html.toLowerCase().includes("</body>")) return response;
+  const headers = new Headers(response.headers);
+  return new Response(html.replace(/<\/body>/i, script + "</body>"), { status: response.status, statusText: response.statusText, headers });
+};
+
 export { ChatRoom };
 
 export default {
@@ -96,6 +108,7 @@ export default {
         return apiJson({ error: "اتصال سرور برقرار نشد.", detail: String(error?.message || error) }, 500);
       }
     }
-    return originalWorker.fetch(request, env, ctx);
+    const response = await originalWorker.fetch(request, env, ctx);
+    return await withAdminDeleteHandler(request, response);
   }
 };
