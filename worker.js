@@ -6,14 +6,56 @@ const apiJson = (data, status = 200) => new Response(JSON.stringify(data), { sta
 ChatRoom.prototype.fetch = async function(request) {
   try {
     const url = new URL(request.url);
-    if ((request.method === "POST" && url.pathname === "/admin/grant-diamonds") || (request.method === "GET" && (url.pathname === "/admin/user-wallet" || url.pathname === "/admin/users"))) {
+    const isAdminRoute = (request.method === "POST" && (url.pathname === "/admin/grant-diamonds" || url.pathname === "/admin/delete-user")) || (request.method === "GET" && (url.pathname === "/admin/user-wallet" || url.pathname === "/admin/users"));
+    if (isAdminRoute) {
       await this.ready;
       const admin = this.getAdminUser(request);
       if (!admin) return apiJson({ error: "دسترسی غیرمجاز." }, 403);
+
       if (request.method === "GET" && url.pathname === "/admin/users") {
         const rows = this.ctx.storage.sql.exec("SELECT username, avatar, role, is_starred, is_blocked, is_crowned, is_diamond, is_vip, vip_expires_at, flowers, diamonds, created_at FROM users ORDER BY created_at ASC, username COLLATE NOCASE").toArray();
         return apiJson({ ok: true, count: rows.length, users: rows });
       }
+
+      if (request.method === "POST" && url.pathname === "/admin/delete-user") {
+        const body = await request.json().catch(() => ({}));
+        const username = String(body.username || "").trim();
+        if (!username || username.length > 24) return apiJson({ error: "کاربر نامعتبر است." }, 400);
+        if (username === "Morteza2026") return apiJson({ error: "حساب مدیر قابل حذف نیست." }, 400);
+
+        const exists = this.ctx.storage.sql.exec("SELECT username, role FROM users WHERE username = ? LIMIT 1", username).toArray();
+        if (!exists.length) return apiJson({ error: "کاربر پیدا نشد." }, 404);
+        if (String(exists[0].role || "").trim() === "admin") return apiJson({ error: "حساب مدیر قابل حذف نیست." }, 403);
+
+        try {
+          this.ctx.storage.sql.exec("BEGIN");
+          this.ctx.storage.sql.exec("DELETE FROM sessions WHERE username = ?", username);
+          this.ctx.storage.sql.exec("DELETE FROM private_reads WHERE username = ? OR other_user = ?", username, username);
+          this.ctx.storage.sql.exec("DELETE FROM private_messages WHERE sender = ? OR recipient = ?", username, username);
+          this.ctx.storage.sql.exec("DELETE FROM presence WHERE username = ?", username);
+          this.ctx.storage.sql.exec("DELETE FROM message_reactions WHERE username = ?", username);
+          this.ctx.storage.sql.exec("DELETE FROM room_bans WHERE username = ?", username);
+          this.ctx.storage.sql.exec("DELETE FROM room_members WHERE username = ?", username);
+          this.ctx.storage.sql.exec("DELETE FROM room_messages WHERE sender = ?", username);
+          this.ctx.storage.sql.exec("DELETE FROM voice_files WHERE username = ?", username);
+          this.ctx.storage.sql.exec("DELETE FROM messages WHERE username = ?", username);
+          this.ctx.storage.sql.exec("DELETE FROM room_members WHERE room_id IN (SELECT id FROM private_rooms WHERE owner = ?)", username);
+          this.ctx.storage.sql.exec("DELETE FROM room_bans WHERE room_id IN (SELECT id FROM private_rooms WHERE owner = ?)", username);
+          this.ctx.storage.sql.exec("DELETE FROM room_messages WHERE room_id IN (SELECT id FROM private_rooms WHERE owner = ?)", username);
+          this.ctx.storage.sql.exec("DELETE FROM private_rooms WHERE owner = ?", username);
+          const result = this.ctx.storage.sql.exec("DELETE FROM users WHERE username = ?", username);
+          if (!Number(result.rowsWritten || 0)) {
+            this.ctx.storage.sql.exec("ROLLBACK");
+            return apiJson({ error: "حذف کاربر انجام نشد." }, 500);
+          }
+          this.ctx.storage.sql.exec("COMMIT");
+          return apiJson({ ok: true, deleted: username, message: "کاربر با موفقیت حذف شد." });
+        } catch (error) {
+          try { this.ctx.storage.sql.exec("ROLLBACK"); } catch (rollbackError) {}
+          throw error;
+        }
+      }
+
       if (request.method === "GET") {
         const username = String(url.searchParams.get("username") || "").trim();
         if (!username || username.length > 24) return apiJson({ error: "کاربر نامعتبر است." }, 400);
@@ -21,6 +63,7 @@ ChatRoom.prototype.fetch = async function(request) {
         if (!rows.length) return apiJson({ error: "کاربر پیدا نشد." }, 404);
         return apiJson({ ok: true, username, diamonds: Number(rows[0].diamonds || 0) });
       }
+
       const body = await request.json().catch(() => ({}));
       const username = String(body.username || "").trim();
       const amount = Number(body.amount);
@@ -45,7 +88,7 @@ export { ChatRoom };
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if ((request.method === "POST" && url.pathname === "/admin/grant-diamonds") || (request.method === "GET" && (url.pathname === "/admin/user-wallet" || url.pathname === "/admin/users"))) {
+    if ((request.method === "POST" && (url.pathname === "/admin/grant-diamonds" || url.pathname === "/admin/delete-user")) || (request.method === "GET" && (url.pathname === "/admin/user-wallet" || url.pathname === "/admin/users"))) {
       try {
         const id = env.CHAT_ROOM.idFromName("public-room");
         return await env.CHAT_ROOM.get(id).fetch(request);
