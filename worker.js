@@ -6,10 +6,14 @@ const apiJson = (data, status = 200) => new Response(JSON.stringify(data), { sta
 ChatRoom.prototype.fetch = async function(request) {
   try {
     const url = new URL(request.url);
-    if ((request.method === "POST" && url.pathname === "/admin/grant-diamonds") || (request.method === "GET" && url.pathname === "/admin/user-wallet")) {
+    if ((request.method === "POST" && url.pathname === "/admin/grant-diamonds") || (request.method === "GET" && (url.pathname === "/admin/user-wallet" || url.pathname === "/admin/users"))) {
       await this.ready;
       const admin = this.getAdminUser(request);
       if (!admin) return apiJson({ error: "دسترسی غیرمجاز." }, 403);
+      if (request.method === "GET" && url.pathname === "/admin/users") {
+        const rows = this.ctx.storage.sql.exec("SELECT username, avatar, role, is_starred, is_blocked, is_crowned, is_diamond, is_vip, vip_expires_at, flowers, diamonds, created_at FROM users ORDER BY created_at ASC, username COLLATE NOCASE").toArray();
+        return apiJson({ ok: true, count: rows.length, users: rows });
+      }
       if (request.method === "GET") {
         const username = String(url.searchParams.get("username") || "").trim();
         if (!username || username.length > 24) return apiJson({ error: "کاربر نامعتبر است." }, 400);
@@ -41,7 +45,7 @@ export { ChatRoom };
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if ((request.method === "POST" && url.pathname === "/admin/grant-diamonds") || (request.method === "GET" && url.pathname === "/admin/user-wallet")) {
+    if ((request.method === "POST" && url.pathname === "/admin/grant-diamonds") || (request.method === "GET" && (url.pathname === "/admin/user-wallet" || url.pathname === "/admin/users"))) {
       try {
         const id = env.CHAT_ROOM.idFromName("public-room");
         return await env.CHAT_ROOM.get(id).fetch(request);
