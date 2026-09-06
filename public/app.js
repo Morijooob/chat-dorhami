@@ -49,6 +49,10 @@ function avatarFor(name) {
 async function loadProfile(name) {
   const clean = String(name || '').trim();
   if (!clean) return '👤';
+  window.dorhamiAvatars = window.dorhamiAvatars || {};
+  if (Object.prototype.hasOwnProperty.call(window.dorhamiAvatars, clean)) {
+    return window.dorhamiAvatars[clean];
+  }
   try {
     const data = await api(`/profile?username=${encodeURIComponent(clean)}`, { method: 'GET', headers: {} });
     window.dorhamiAvatars = window.dorhamiAvatars || {};
@@ -215,9 +219,6 @@ async function updatePresence() {
   if (!username) return;
   try {
     await api('/presence', { method: 'POST', body: JSON.stringify({ username }) });
-    const reward = await api('/rewards/claim', { method: 'POST', body: JSON.stringify({}) });
-    updateRewardBalance(reward.flowers);
-    if (reward.rewarded) showActivityRewardToast('🎁 پاداش فعالیت: ۱۰ 🌹 گل به حسابت اضافه شد!');
     const data = await api('/presence', { method: 'GET', headers: {} });
     const names = (data.users || []).map(u => u.username);
     const label = `${data.count || 0} نفر آنلاین`;
@@ -231,7 +232,7 @@ async function updatePresence() {
 function startPresence() {
   if (presenceTimer) clearInterval(presenceTimer);
   updatePresence();
-  presenceTimer = setInterval(updatePresence, 10000);
+  presenceTimer = setInterval(updatePresence, 120000);
 }
 
 function stopPresence() {
@@ -265,7 +266,7 @@ async function checkPrivateUnread() {
 function startUnreadPolling() {
   if (unreadTimer) clearInterval(unreadTimer);
   checkPrivateUnread();
-  unreadTimer = setInterval(checkPrivateUnread, 2500);
+  unreadTimer = setInterval(checkPrivateUnread, 60000);
 }
 
 function stopUnreadPolling() {
@@ -288,7 +289,7 @@ async function showChat() {
   startPresence();
   startUnreadPolling();
   if (timer) clearInterval(timer);
-  timer = setInterval(loadCurrentConversation, 2500);
+  timer = setInterval(loadCurrentConversation, 15000);
   messageInput.focus();
 }
 
