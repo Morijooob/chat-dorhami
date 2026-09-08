@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://chat-dorhami.m73216r.workers.dev/sitemap.xml
